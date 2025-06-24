@@ -698,7 +698,7 @@ dependencies = [
 
 [[package]]
 name = "demand-cli"
-version = "0.1.12"
+version = "0.1.14"
 dependencies = [
  "async-recursion",
  "axum",
