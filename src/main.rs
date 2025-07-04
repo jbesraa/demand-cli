@@ -41,7 +41,6 @@ const DEFAULT_LISTEN_ADDRESS: &str = "0.0.0.0:32767";
 const REPO_OWNER: &str = "demand-open-source";
 const REPO_NAME: &str = "demand-cli";
 const BIN_NAME: &str = "demand-cli";
-const TRACKED_DIFFS: usize = 10;
 
 lazy_static! {
     static ref SV1_DOWN_LISTEN_ADDR: String =
