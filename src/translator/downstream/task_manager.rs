@@ -12,6 +12,7 @@ enum Task {
     SendDownstream(AbortOnDrop),
     Notify(AbortOnDrop),
     Update(AbortOnDrop),
+    SharesMonitor(AbortOnDrop),
 }
 
 pub struct TaskManager {
@@ -83,6 +84,17 @@ impl TaskManager {
         let send_task = self_.safe_lock(|s| s.send_task.clone()).unwrap();
         send_task
             .send(Task::AcceptConnection(abortable))
+            .await
+            .map_err(|_| ())
+    }
+
+    pub async fn add_shares_monitor(
+        self_: Arc<Mutex<Self>>,
+        abortable: AbortOnDrop,
+    ) -> Result<(), ()> {
+        let send_task = self_.safe_lock(|s| s.send_task.clone()).unwrap();
+        send_task
+            .send(Task::SharesMonitor(abortable))
             .await
             .map_err(|_| ())
     }
