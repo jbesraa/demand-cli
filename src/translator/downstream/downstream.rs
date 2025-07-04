@@ -78,7 +78,7 @@ impl DownstreamDifficultyConfig {
     }
 
     pub fn add_difficulty(&mut self, new_diff: f32) {
-        if self.current_difficulties.len() >= crate::TRACKED_DIFFS {
+        if self.current_difficulties.len() >= 3 {
             self.current_difficulties.pop_front();
         }
         self.current_difficulties.push_back(new_diff);
@@ -400,7 +400,6 @@ impl IsServer<'static> for Downstream {
             Some(false),
         )
     }
-    fn handle_suggest_difficulty(&self, _: &sv1_api::client_to_server::SuggestDifficulty) { todo!() }
 
     /// Handle the response to a `mining.subscribe` message received from the client.
     /// The subscription messages are erroneous and just used to conform the SV1 protocol spec.
