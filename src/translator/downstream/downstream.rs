@@ -510,9 +510,40 @@ impl IsServer<'static> for Downstream {
                 }
             }
             Ok(false) => {
-                warn!("Share rejected: Exceeded 70 shares/min limit");
-                self.stats_sender.update_rejected_shares(self.connection_id);
-                false
+                warn!("Share will not be sent upstream: Exceeded 70 shares/min limit");
+                if let Some(job) = self
+                    .recent_jobs
+                    .get_matching_job(job_id_as_number.expect("checked above"))
+                {
+                    request.job_id = job.job_id.clone();
+                    //check share is valid
+                    if let Some(met_difficulty) = validate_share(
+                        &request,
+                        &job,
+                        &self.difficulty_mgmt.current_difficulties,
+                        self.extranonce1.clone(),
+                        self.version_rolling_mask.clone(),
+                    ) {
+                        info!(
+                            "Share for Job {} and difficulty {} is accepted",
+                            request.job_id, met_difficulty
+                        );
+                        // TODO here stats sender should update accepted shares that are not sent
+                        // upstream
+                        true
+                    } else {
+                        error!("Share rejected: Invalid share");
+                        self.stats_sender.update_rejected_shares(self.connection_id);
+                        false
+                    }
+                } else {
+                    error!(
+                        "Share rejected: can not find job with id {}",
+                        request.job_id
+                    );
+                    self.stats_sender.update_rejected_shares(self.connection_id);
+                    false
+                }
             }
             Err(e) => {
                 error!("Failed to record share: {e:?}");

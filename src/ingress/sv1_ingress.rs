@@ -1,4 +1,7 @@
-use std::{net::{IpAddr, SocketAddr}, sync::Arc};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+};
 
 use crate::{
     config::Configuration,
@@ -96,7 +99,7 @@ impl Downstream {
                 if Configuration::sv1_ingress_log() {
                     info!("Sending msg to upstream: {}", message);
                 }
-                if ! is_subscribed {
+                if !is_subscribed {
                     if message.contains("mining.subscribe") {
                         is_subscribed = true;
                         if message.contains("LUXminer") {
@@ -158,7 +161,7 @@ impl Downstream {
     }
 }
 
-#[derive(Debug,Clone,Copy)]
+#[derive(Debug, Clone, Copy)]
 enum Firmware {
     Luxor,
     Other,
