@@ -321,6 +321,10 @@ mod test {
         sync::Arc,
         time::{Duration, Instant},
     };
+    use sv1_api::{
+        server_to_client::Notify,
+        utils::{HexU32Be, MerkleNode, PrevHash},
+    };
     use tokio::sync::mpsc::channel;
 
     #[test]
@@ -440,6 +444,18 @@ mod test {
         };
         let (tx_sv1_submit, _rx_sv1_submit) = tokio::sync::mpsc::channel(10);
         let (tx_outgoing, _rx_outgoing) = channel(10);
+        let random_str = rand::thread_rng().gen::<[u8; 32]>().to_vec();
+        let first_job = Notify {
+            job_id: "ciao".to_string(),
+            prev_hash: PrevHash::try_from("0".repeat(64).as_str()).unwrap(),
+            coin_base1: "ffff".try_into().unwrap(),
+            coin_base2: "ffff".try_into().unwrap(),
+            merkle_branch: vec![MerkleNode::try_from(random_str).unwrap()],
+            version: HexU32Be(5667),
+            bits: HexU32Be(5678),
+            time: HexU32Be(5609),
+            clean_jobs: true,
+        };
         let mut downstream = Downstream::new(
             1,
             vec![],
@@ -448,11 +464,11 @@ mod test {
             None,
             tx_sv1_submit,
             tx_outgoing,
-            false,
             0,
             downstream_conf.clone(),
             Arc::new(Mutex::new(upstream_config)),
             crate::api::stats::StatsSender::new(),
+            first_job,
         );
         downstream.difficulty_mgmt.estimated_downstream_hash_rate = start_hashrate as f32;
 
