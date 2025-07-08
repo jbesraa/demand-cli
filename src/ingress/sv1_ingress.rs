@@ -99,14 +99,12 @@ impl Downstream {
                 if Configuration::sv1_ingress_log() {
                     info!("Sending msg to upstream: {}", message);
                 }
-                if !is_subscribed {
-                    if message.contains("mining.subscribe") {
-                        is_subscribed = true;
-                        if message.contains("LUXminer") {
-                            firmware.safe_lock(|f| *f = Firmware::Luxor).unwrap();
-                        } else {
-                            firmware.safe_lock(|f| *f = Firmware::Other).unwrap();
-                        }
+                if !is_subscribed && message.contains("mining.subscribe") {
+                    is_subscribed = true;
+                    if message.contains("LUXminer") {
+                        firmware.safe_lock(|f| *f = Firmware::Luxor).unwrap();
+                    } else {
+                        firmware.safe_lock(|f| *f = Firmware::Other).unwrap();
                     }
                 }
                 if send.send(message).await.is_err() {

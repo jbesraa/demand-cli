@@ -26,6 +26,7 @@ use super::{
 use crate::{
     proxy_state::{ProxyState, TranslatorState, UpstreamType},
     shared::utils::AbortOnDrop,
+    translator::utils::allow_submit_share,
 };
 use lazy_static::lazy_static;
 use roles_logic_sv2::{channel_logic::channel_factory::OnNewShare, Error as RolesLogicError};
@@ -301,19 +302,29 @@ impl Bridge {
                 );
             }
             Ok(OnNewShare::SendSubmitShareUpstream((s, _))) => {
-                info!(
-                    "Share with id {} meets upstream target from channel {} and job {}",
-                    &share_id, &channel_id, &job_id
-                );
-                match s {
-                    Share::Extended(share) => {
-                        if tx_sv2_submit_shares_ext.send(share).await.is_err() {
-                            error!("Failed to send SubmitShareExtended downstream");
-                            return Err(Error::AsyncChannelError);
-                        }
+                if let Ok(is_rate_limited) = allow_submit_share() {
+                    if !is_rate_limited {
+                        warn!("Share will not be sent upstream: Exceeded 70 shares/min limit");
+                        return Ok(());
                     }
-                    // We are in an extended channel shares are extended
-                    Share::Standard(_) => unreachable!(),
+                    info!(
+                        "Share with id {} meets upstream target from channel {} and job {}",
+                        &share_id, &channel_id, &job_id
+                    );
+                    match s {
+                        Share::Extended(share) => {
+                            if tx_sv2_submit_shares_ext.send(share).await.is_err() {
+                                error!("Failed to send SubmitShareExtended downstream");
+                                return Err(Error::AsyncChannelError);
+                            }
+                        }
+                        // We are in an extended channel shares are extended
+                        Share::Standard(_) => unreachable!(),
+                    }
+                } else {
+                    error!("Failed to record share: Bridge mutex poisoned");
+                    ProxyState::update_inconsistency(Some(1));
+                    return Err(Error::BridgeMutexPoisoned);
                 }
             }
             // We are in an extended channel this variant is group channle only
