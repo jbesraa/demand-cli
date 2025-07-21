@@ -3,7 +3,7 @@ mod downstream;
 mod error;
 mod proxy;
 mod upstream;
-pub mod utils;
+mod utils;
 
 use bitcoin::Address;
 use error::Error;

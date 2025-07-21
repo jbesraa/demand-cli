@@ -14,7 +14,9 @@ lazy_static! {
 #[derive(Parser)]
 struct Args {
     #[clap(long)]
-    test: bool,
+    staging: bool,
+    #[clap(long)]
+    local: bool,
     #[clap(long = "d", short = 'd', value_parser = parse_hashrate)]
     downstream_hashrate: Option<f32>,
     #[clap(long = "loglevel", short = 'l')]
@@ -29,8 +31,10 @@ struct Args {
     adjustment_interval: Option<u64>,
     #[clap(long = "pool", short = 'p', value_delimiter = ',')]
     pool_addresses: Option<Vec<String>>,
-    #[clap(long = "test-pool", value_delimiter = ',')]
-    test_pool_addresses: Option<Vec<String>>,
+    #[clap(long = "staging-pool", value_delimiter = ',')]
+    staging_pool_addresses: Option<Vec<String>>,
+    #[clap(long = "local-pool", value_delimiter = ',')]
+    local_pool_addresses: Option<Vec<String>>,
     #[clap(long)]
     token: Option<String>,
     #[clap(long)]
@@ -52,32 +56,60 @@ struct ConfigFile {
     token: Option<String>,
     tp_address: Option<String>,
     pool_addresses: Option<Vec<String>>,
-    test_pool_addresses: Option<Vec<String>>,
+    staging_pool_addresses: Option<Vec<String>>,
+    local_pool_addresses: Option<Vec<String>>,
     interval: Option<u64>,
     delay: Option<u64>,
     downstream_hashrate: Option<String>,
     loglevel: Option<String>,
     nc_loglevel: Option<String>,
     sv1_log: Option<bool>,
-    test: Option<bool>,
+    staging: Option<bool>,
+    local: Option<bool>,
     listening_addr: Option<String>,
     api_server_port: Option<String>,
     monitor: Option<bool>,
     auto_update: Option<bool>,
 }
 
+impl ConfigFile {
+    pub fn default() -> Self {
+        ConfigFile {
+            token: None,
+            tp_address: None,
+            pool_addresses: None,
+            staging_pool_addresses: None,
+            local_pool_addresses: None,
+            interval: None,
+            delay: None,
+            downstream_hashrate: None,
+            loglevel: None,
+            nc_loglevel: None,
+            sv1_log: None,
+            staging: None,
+            local: None,
+            listening_addr: None,
+            api_server_port: None,
+            monitor: None,
+            auto_update: None,
+        }
+    }
+}
+
 pub struct Configuration {
     token: Option<String>,
     tp_address: Option<String>,
     pool_addresses: Option<Vec<SocketAddr>>,
-    test_pool_addresses: Option<Vec<SocketAddr>>,
+    staging_pool_addresses: Option<Vec<SocketAddr>>,
+    local_pool_addresses: Option<Vec<SocketAddr>>,
     interval: u64,
     delay: u64,
     downstream_hashrate: f32,
     loglevel: String,
     nc_loglevel: String,
     sv1_log: bool,
-    test: bool,
+    staging: bool,
+    local: bool,
     listening_addr: Option<String>,
     api_server_port: String,
     monitor: bool,
@@ -93,10 +125,12 @@ impl Configuration {
     }
 
     pub fn pool_address() -> Option<Vec<SocketAddr>> {
-        if CONFIG.test {
-            CONFIG.test_pool_addresses.clone() // Return test pool addresses in test mode
+        if CONFIG.staging {
+            CONFIG.staging_pool_addresses.clone() // Return staging pool addresses
+        } else if CONFIG.local {
+            CONFIG.local_pool_addresses.clone() // Return local pool addresses
         } else {
-            CONFIG.pool_addresses.clone()
+            CONFIG.pool_addresses.clone() // Return production pool addresses
         }
     }
 
@@ -149,8 +183,25 @@ impl Configuration {
         CONFIG.sv1_log
     }
 
-    pub fn test() -> bool {
-        CONFIG.test
+    pub fn staging() -> bool {
+        CONFIG.staging
+    }
+
+    pub fn local() -> bool {
+        CONFIG.local
+    }
+
+    /// Returns the environment based on the configuration.
+    /// Possible values: "staging", "local", "production".
+    /// If no environment is set, it defaults to "production".
+    pub fn environment() -> String {
+        if CONFIG.staging {
+            "staging".to_string()
+        } else if CONFIG.local {
+            "local".to_string()
+        } else {
+            "production".to_string()
+        }
     }
 
     pub fn monitor() -> bool {
@@ -168,23 +219,7 @@ impl Configuration {
         let config: ConfigFile = std::fs::read_to_string(&config_path)
             .ok()
             .and_then(|content| toml::from_str(&content).ok())
-            .unwrap_or(ConfigFile {
-                token: None,
-                tp_address: None,
-                pool_addresses: None,
-                test_pool_addresses: None,
-                interval: None,
-                delay: None,
-                downstream_hashrate: None,
-                loglevel: None,
-                nc_loglevel: None,
-                sv1_log: None,
-                test: None,
-                listening_addr: None,
-                api_server_port: None,
-                monitor: None,
-                auto_update: None,
-            });
+            .unwrap_or(ConfigFile::default());
 
         let token = args
             .token
@@ -221,8 +256,8 @@ impl Configuration {
                 })
             });
 
-        let test_pool_addresses: Option<Vec<SocketAddr>> = args
-            .test_pool_addresses
+        let staging_pool_addresses: Option<Vec<SocketAddr>> = args
+            .staging_pool_addresses
             .map(|addresses| {
                 addresses
                     .into_iter()
@@ -230,7 +265,7 @@ impl Configuration {
                     .collect::<Vec<SocketAddr>>()
             })
             .or_else(|| {
-                config.test_pool_addresses.map(|addresses| {
+                config.staging_pool_addresses.map(|addresses| {
                     addresses
                         .into_iter()
                         .map(parse_address)
@@ -238,7 +273,31 @@ impl Configuration {
                 })
             })
             .or_else(|| {
-                std::env::var("TEST_POOL_ADDRESSES").ok().map(|s| {
+                std::env::var("STAGING_POOL_ADDRESSES").ok().map(|s| {
+                    s.split(',')
+                        .map(|s| parse_address(s.trim().to_string()))
+                        .collect::<Vec<SocketAddr>>()
+                })
+            });
+
+        let local_pool_addresses: Option<Vec<SocketAddr>> = args
+            .local_pool_addresses
+            .map(|addresses| {
+                addresses
+                    .into_iter()
+                    .map(parse_address)
+                    .collect::<Vec<SocketAddr>>()
+            })
+            .or_else(|| {
+                config.local_pool_addresses.map(|addresses| {
+                    addresses
+                        .into_iter()
+                        .map(parse_address)
+                        .collect::<Vec<SocketAddr>>()
+                })
+            })
+            .or_else(|| {
+                std::env::var("LOCAL_POOL_ADDRESSES").ok().map(|s| {
                     s.split(',')
                         .map(|s| parse_address(s.trim().to_string()))
                         .collect::<Vec<SocketAddr>>()
@@ -316,8 +375,9 @@ impl Configuration {
             || config.sv1_log.unwrap_or(false)
             || std::env::var("SV1_LOGLEVEL").is_ok();
 
-        let test = args.test || config.test.unwrap_or(false) || std::env::var("TEST").is_ok();
-
+        let staging =
+            args.staging || config.staging.unwrap_or(false) || std::env::var("STAGING").is_ok();
+        let local = args.local || config.local.unwrap_or(false) || std::env::var("LOCAL").is_ok();
         let monitor =
             args.monitor || config.monitor.unwrap_or(false) || std::env::var("MONITOR").is_ok();
 
@@ -329,14 +389,16 @@ impl Configuration {
             token,
             tp_address,
             pool_addresses,
-            test_pool_addresses,
+            staging_pool_addresses,
+            local_pool_addresses,
             interval,
             delay,
             downstream_hashrate,
             loglevel,
             nc_loglevel,
             sv1_log,
-            test,
+            staging,
+            local,
             listening_addr,
             api_server_port,
             monitor,
