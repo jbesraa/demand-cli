@@ -42,6 +42,9 @@ const DEFAULT_LISTEN_ADDRESS: &str = "0.0.0.0:32767";
 const REPO_OWNER: &str = "demand-open-source";
 const REPO_NAME: &str = "demand-cli";
 const BIN_NAME: &str = "demand-cli";
+const STAGING_URL: &str = "https://staging-user-dashboard-server.dmnd.work";
+const LOCAL_URL: &str = "http://localhost:8787/api";
+const PRODUCTION_URL: &str = "https://user-dashboard-server.dmnd.work";
 
 lazy_static! {
     static ref SV1_DOWN_LISTEN_ADDR: String =
@@ -101,6 +104,7 @@ async fn main() {
     let auth_pub_k: Secp256k1PublicKey = AUTH_PUB_KEY.parse().expect("Invalid public key");
 
     let pool_addresses = Configuration::pool_address()
+        .await
         .filter(|p| !p.is_empty())
         .unwrap_or_else(|| match Configuration::environment().as_str() {
             "staging" => panic!("Staging pool address is missing"),

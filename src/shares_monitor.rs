@@ -9,18 +9,15 @@ use crate::{
     config::Configuration,
     proxy_state::{DownstreamType, ProxyState},
     shared::error::Error,
+    LOCAL_URL, PRODUCTION_URL, STAGING_URL,
 };
-
-const STAGING_URL: &str = "http://staging-user-dashboard-server.dmnd.work/share/save";
-const LOCAL_URL: &str = "http://localhost:8787/api/share/save";
-const PRODUCTION_URL: &str = "http://user-dashboard-server.dmnd.work/share/save";
 
 fn monitoring_server_url() -> String {
     // Determine the monitoring server URL based on the environment
     match Configuration::environment().as_str() {
-        "staging" => STAGING_URL.to_string(),
-        "local" => LOCAL_URL.to_string(),
-        "production" => PRODUCTION_URL.to_string(),
+        "staging" => format!("{}/share/save", STAGING_URL),
+        "local" => format!("{}/share/save", LOCAL_URL),
+        "production" => format!("{}/share/save", PRODUCTION_URL),
         _ => unreachable!(),
     }
 }

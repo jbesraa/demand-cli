@@ -7,7 +7,7 @@ use std::{
 };
 use tracing::{debug, error, info, warn};
 
-use crate::{HashUnit, DEFAULT_SV1_HASHPOWER};
+use crate::{HashUnit, DEFAULT_SV1_HASHPOWER, PRODUCTION_URL, STAGING_URL};
 lazy_static! {
     pub static ref CONFIG: Configuration = Configuration::load_config();
 }
@@ -29,12 +29,6 @@ struct Args {
     delay: Option<u64>,
     #[clap(long = "interval", short = 'i')]
     adjustment_interval: Option<u64>,
-    #[clap(long = "pool", short = 'p', value_delimiter = ',')]
-    pool_addresses: Option<Vec<String>>,
-    #[clap(long = "staging-pool", value_delimiter = ',')]
-    staging_pool_addresses: Option<Vec<String>>,
-    #[clap(long = "local-pool", value_delimiter = ',')]
-    local_pool_addresses: Option<Vec<String>>,
     #[clap(long)]
     token: Option<String>,
     #[clap(long)]
@@ -55,9 +49,6 @@ struct Args {
 struct ConfigFile {
     token: Option<String>,
     tp_address: Option<String>,
-    pool_addresses: Option<Vec<String>>,
-    staging_pool_addresses: Option<Vec<String>>,
-    local_pool_addresses: Option<Vec<String>>,
     interval: Option<u64>,
     delay: Option<u64>,
     downstream_hashrate: Option<String>,
@@ -77,9 +68,6 @@ impl ConfigFile {
         ConfigFile {
             token: None,
             tp_address: None,
-            pool_addresses: None,
-            staging_pool_addresses: None,
-            local_pool_addresses: None,
             interval: None,
             delay: None,
             downstream_hashrate: None,
@@ -99,9 +87,6 @@ impl ConfigFile {
 pub struct Configuration {
     token: Option<String>,
     tp_address: Option<String>,
-    pool_addresses: Option<Vec<SocketAddr>>,
-    staging_pool_addresses: Option<Vec<SocketAddr>>,
-    local_pool_addresses: Option<Vec<SocketAddr>>,
     interval: u64,
     delay: u64,
     downstream_hashrate: f32,
@@ -124,14 +109,8 @@ impl Configuration {
         CONFIG.tp_address.clone()
     }
 
-    pub fn pool_address() -> Option<Vec<SocketAddr>> {
-        if CONFIG.staging {
-            CONFIG.staging_pool_addresses.clone() // Return staging pool addresses
-        } else if CONFIG.local {
-            CONFIG.local_pool_addresses.clone() // Return local pool addresses
-        } else {
-            CONFIG.pool_addresses.clone() // Return production pool addresses
-        }
+    pub async fn pool_address() -> Option<Vec<SocketAddr>> {
+        fetch_pool_urls().await
     }
 
     pub fn adjustment_interval() -> u64 {
@@ -232,78 +211,6 @@ impl Configuration {
             .or(config.tp_address)
             .or_else(|| std::env::var("TP_ADDRESS").ok());
 
-        let pool_addresses: Option<Vec<SocketAddr>> = args
-            .pool_addresses
-            .map(|addresses| {
-                addresses
-                    .into_iter()
-                    .map(parse_address)
-                    .collect::<Vec<SocketAddr>>()
-            })
-            .or_else(|| {
-                config.pool_addresses.map(|addresses| {
-                    addresses
-                        .into_iter()
-                        .map(parse_address)
-                        .collect::<Vec<SocketAddr>>()
-                })
-            })
-            .or_else(|| {
-                std::env::var("POOL_ADDRESSES").ok().map(|s| {
-                    s.split(',')
-                        .map(|s| parse_address(s.trim().to_string()))
-                        .collect::<Vec<SocketAddr>>()
-                })
-            });
-
-        let staging_pool_addresses: Option<Vec<SocketAddr>> = args
-            .staging_pool_addresses
-            .map(|addresses| {
-                addresses
-                    .into_iter()
-                    .map(parse_address)
-                    .collect::<Vec<SocketAddr>>()
-            })
-            .or_else(|| {
-                config.staging_pool_addresses.map(|addresses| {
-                    addresses
-                        .into_iter()
-                        .map(parse_address)
-                        .collect::<Vec<SocketAddr>>()
-                })
-            })
-            .or_else(|| {
-                std::env::var("STAGING_POOL_ADDRESSES").ok().map(|s| {
-                    s.split(',')
-                        .map(|s| parse_address(s.trim().to_string()))
-                        .collect::<Vec<SocketAddr>>()
-                })
-            });
-
-        let local_pool_addresses: Option<Vec<SocketAddr>> = args
-            .local_pool_addresses
-            .map(|addresses| {
-                addresses
-                    .into_iter()
-                    .map(parse_address)
-                    .collect::<Vec<SocketAddr>>()
-            })
-            .or_else(|| {
-                config.local_pool_addresses.map(|addresses| {
-                    addresses
-                        .into_iter()
-                        .map(parse_address)
-                        .collect::<Vec<SocketAddr>>()
-                })
-            })
-            .or_else(|| {
-                std::env::var("LOCAL_POOL_ADDRESSES").ok().map(|s| {
-                    s.split(',')
-                        .map(|s| parse_address(s.trim().to_string()))
-                        .collect::<Vec<SocketAddr>>()
-                })
-            });
-
         let interval = args
             .adjustment_interval
             .or(config.interval)
@@ -388,9 +295,6 @@ impl Configuration {
         Configuration {
             token,
             tp_address,
-            pool_addresses,
-            staging_pool_addresses,
-            local_pool_addresses,
             interval,
             delay,
             downstream_hashrate,
@@ -446,4 +350,52 @@ fn parse_address(addr: String) -> SocketAddr {
         .expect("Failed to parse socket address")
         .next()
         .expect("No socket address resolved")
+}
+
+/// Fetches pool URLs from the server based on the environment.
+async fn fetch_pool_urls() -> Option<Vec<SocketAddr>> {
+    if CONFIG.local {
+        return Some(vec![parse_address("127.0.0.1:20000".to_string())]);
+    };
+
+    let url = if CONFIG.staging {
+        STAGING_URL
+    } else {
+        PRODUCTION_URL
+    };
+    let endpoint = format!("{}/pool/urls", url);
+    debug!("Fetching pool URLs from: {}", endpoint);
+
+    let response = match reqwest::get(endpoint).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            error!("Failed to fetch pool urls: {}", e);
+            return None;
+        }
+    };
+
+    let addresses: Vec<PoolAddress> = match response.json().await {
+        Ok(addrs) => addrs,
+        Err(e) => {
+            error!("Failed to parse pool urls: {}", e);
+            return None;
+        }
+    };
+
+    // Parse the addresses into SocketAddr
+    let socket_addrs: Vec<SocketAddr> = addresses
+        .into_iter()
+        .map(|addr| {
+            let address = format!("{}:{}", addr.host, addr.port);
+            parse_address(address)
+        })
+        .collect();
+    debug!("Pool addresses: {:?}", socket_addrs);
+    Some(socket_addrs)
+}
+
+#[derive(Debug, Deserialize)]
+struct PoolAddress {
+    host: String,
+    port: u16,
 }
