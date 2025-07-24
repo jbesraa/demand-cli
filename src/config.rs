@@ -1,13 +1,14 @@
 use clap::Parser;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::{
     net::{SocketAddr, ToSocketAddrs},
     path::PathBuf,
 };
 use tracing::{debug, error, info, warn};
 
-use crate::{HashUnit, DEFAULT_SV1_HASHPOWER, PRODUCTION_URL, STAGING_URL};
+use crate::{shared::error::Error, HashUnit, DEFAULT_SV1_HASHPOWER, PRODUCTION_URL, STAGING_URL};
 lazy_static! {
     pub static ref CONFIG: Configuration = Configuration::load_config();
 }
@@ -110,7 +111,13 @@ impl Configuration {
     }
 
     pub async fn pool_address() -> Option<Vec<SocketAddr>> {
-        fetch_pool_urls().await
+        match fetch_pool_urls().await {
+            Ok(addresses) => Some(addresses),
+            Err(e) => {
+                error!("Failed to fetch pool addresses: {}", e);
+                None
+            }
+        }
     }
 
     pub fn adjustment_interval() -> u64 {
@@ -353,32 +360,43 @@ fn parse_address(addr: String) -> SocketAddr {
 }
 
 /// Fetches pool URLs from the server based on the environment.
-async fn fetch_pool_urls() -> Option<Vec<SocketAddr>> {
+async fn fetch_pool_urls() -> Result<Vec<SocketAddr>, Error> {
     if CONFIG.local {
-        return Some(vec![parse_address("127.0.0.1:20000".to_string())]);
+        return Ok(vec![parse_address("127.0.0.1:20000".to_string())]);
     };
 
     let url = if CONFIG.staging {
+        info!("Fetching pool URLs from staging server: {}", STAGING_URL);
         STAGING_URL
     } else {
+        info!(
+            "Fetching pool URLs from production server: {}",
+            PRODUCTION_URL
+        );
         PRODUCTION_URL
     };
-    let endpoint = format!("{}/pool/urls", url);
-    debug!("Fetching pool URLs from: {}", endpoint);
+    let endpoint = format!("{}/api/pool/urls", url);
+    let token = Configuration::token().expect("TOKEN is not set");
 
-    let response = match reqwest::get(endpoint).await {
+    let response = match reqwest::Client::new()
+        .post(endpoint)
+        .json(&json!({"token": token}))
+        .send()
+        .await
+    {
         Ok(resp) => resp,
         Err(e) => {
             error!("Failed to fetch pool urls: {}", e);
-            return None;
+            return Err(Error::from(e));
         }
     };
 
+    debug!("Response status: {}", response.status());
     let addresses: Vec<PoolAddress> = match response.json().await {
         Ok(addrs) => addrs,
         Err(e) => {
             error!("Failed to parse pool urls: {}", e);
-            return None;
+            return Err(Error::from(e));
         }
     };
 
@@ -391,7 +409,7 @@ async fn fetch_pool_urls() -> Option<Vec<SocketAddr>> {
         })
         .collect();
     debug!("Pool addresses: {:?}", socket_addrs);
-    Some(socket_addrs)
+    Ok(socket_addrs)
 }
 
 #[derive(Debug, Deserialize)]

@@ -44,7 +44,7 @@ const REPO_NAME: &str = "demand-cli";
 const BIN_NAME: &str = "demand-cli";
 const STAGING_URL: &str = "https://staging-user-dashboard-server.dmnd.work";
 const LOCAL_URL: &str = "http://localhost:8787/api";
-const PRODUCTION_URL: &str = "https://user-dashboard-server.dmnd.work";
+const PRODUCTION_URL: &str = "https://production-user-dashboard-server.dmnd.work";
 
 lazy_static! {
     static ref SV1_DOWN_LISTEN_ADDR: String =
