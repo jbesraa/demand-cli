@@ -2,6 +2,7 @@ use crate::{
     api::stats::StatsSender,
     proxy_state::{DownstreamType, ProxyState},
     shared::utils::AbortOnDrop,
+    shares_monitor::{RejectionReason, ShareInfo, SharesMonitor},
     translator::{error::Error, utils::validate_share},
 };
 
@@ -115,6 +116,7 @@ pub struct Downstream {
     pub(super) stats_sender: StatsSender,
     pub recent_jobs: RecentJobs,
     pub first_job: Notify<'static>,
+    pub share_monitor: SharesMonitor,
 }
 
 impl Downstream {
@@ -194,6 +196,7 @@ impl Downstream {
             stats_sender,
             recent_jobs: RecentJobs::new(),
             first_job: last_notify.expect("we have an assertion at the beginning of this function"),
+            share_monitor: SharesMonitor::new(),
         }));
 
         if let Err(e) = start_receive_downstream(
@@ -233,6 +236,31 @@ impl Downstream {
             error!("Failed to start notify task: {e}");
             ProxyState::update_downstream_state(DownstreamType::TranslatorDownstream);
         };
+
+        if let Err(e) = Self::start_share_monitor(task_manager.clone(), downstream.clone()).await {
+            error!("Failed to start share monitor task: {e}");
+            ProxyState::update_downstream_state(DownstreamType::TranslatorDownstream);
+        }
+    }
+
+    /// Starts the shares monitor task.
+    async fn start_share_monitor(
+        task_manager: Arc<Mutex<TaskManager>>,
+        downstream: Arc<Mutex<Self>>,
+    ) -> Result<(), Error<'static>> {
+        let (share_monitor, connection_id) =
+            downstream.safe_lock(|s| (s.share_monitor.clone(), s.connection_id))?;
+
+        // Create an abortable task for the shares monitor
+        let abortable = tokio::spawn(async move {
+            info!("Starting shares monitor for downstream: {}", connection_id);
+            share_monitor.clone().monitor().await;
+        });
+
+        // Register the task with the task manager so it can be aborted when needed
+        TaskManager::add_shares_monitor(task_manager, abortable.into())
+            .await
+            .map_err(|_| Error::TranslatorTaskManagerFailed)
     }
 
     /// Accept connections from one or more SV1 Downstream roles (SV1 Mining Devices) and create a
@@ -353,6 +381,8 @@ impl Downstream {
         stats_sender: StatsSender,
         first_job: Notify<'static>,
     ) -> Self {
+        use crate::shares_monitor::SharesMonitor;
+
         Downstream {
             connection_id,
             authorized_names,
@@ -368,6 +398,7 @@ impl Downstream {
             first_job,
             stats_sender,
             recent_jobs: RecentJobs::new(),
+            share_monitor: SharesMonitor::new(),
         }
     }
 }
@@ -445,9 +476,19 @@ impl IsServer<'static> for Downstream {
                 "Share rejected: can not convert v1 job id to number. v1 id: {}",
                 request.job_id
             );
+
+            let share = ShareInfo::new(
+                request.user_name.clone(),
+                None,
+                job_id_as_number.expect("checked above") as i64,
+                Some(RejectionReason::InvalidJobIdFormat),
+            );
+            self.share_monitor.insert_share(share);
+
             self.stats_sender.update_rejected_shares(self.connection_id);
             return false;
         }
+        let job_id = job_id_as_number.clone().expect("checked above") as i64;
         crate::translator::utils::update_share_count(self.connection_id); // update share count
         if let Some(job) = self
             .recent_jobs
@@ -481,6 +522,23 @@ impl IsServer<'static> for Downstream {
                             // Return false because submit was not properly handled
                             return false;
                         }
+                        // Share is accepted here
+                        let share = ShareInfo::new(
+                            request.user_name.clone(),
+                            Some(met_difficulty),
+                            job_id,
+                            None,
+                        );
+                        self.share_monitor.insert_share(share);
+                    } else {
+                        // met_difficulty is not latest difficulty, so we mark it as rejected
+                        let share = ShareInfo::new(
+                            request.user_name.clone(),
+                            None,
+                            job_id, // rejected because it was not sent upstream
+                            Some(RejectionReason::DifficultyMismatch),
+                        );
+                        self.share_monitor.insert_share(share);
                     }
                 }
                 self.stats_sender.update_accepted_shares(self.connection_id);
@@ -490,11 +548,25 @@ impl IsServer<'static> for Downstream {
                 );
                 true
             } else {
+                let share = ShareInfo::new(
+                    request.user_name.clone(),
+                    None,
+                    job_id,
+                    Some(RejectionReason::InvalidShare),
+                );
+                self.share_monitor.insert_share(share);
                 error!("Share rejected: Invalid share");
                 self.stats_sender.update_rejected_shares(self.connection_id);
                 false
             }
         } else {
+            let event = ShareInfo::new(
+                request.user_name.clone(),
+                None,
+                job_id,
+                Some(RejectionReason::JobIdNotFound),
+            );
+            self.share_monitor.insert_share(event);
             error!(
                 "Share rejected: can not find job with id {}",
                 request.job_id

@@ -25,6 +25,7 @@ mod proxy_state;
 mod router;
 mod share_accounter;
 mod shared;
+mod shares_monitor;
 mod translator;
 
 const TRANSLATOR_BUFFER_SIZE: usize = 32;
@@ -41,6 +42,9 @@ const DEFAULT_LISTEN_ADDRESS: &str = "0.0.0.0:32767";
 const REPO_OWNER: &str = "demand-open-source";
 const REPO_NAME: &str = "demand-cli";
 const BIN_NAME: &str = "demand-cli";
+const STAGING_URL: &str = "https://staging-user-dashboard-server.dmnd.work";
+const LOCAL_URL: &str = "http://localhost:8787/api";
+const PRODUCTION_URL: &str = "https://production-user-dashboard-server.dmnd.work";
 
 lazy_static! {
     static ref SV1_DOWN_LISTEN_ADDR: String =
@@ -54,7 +58,10 @@ lazy_static! {
 }
 
 lazy_static! {
-    pub static ref AUTH_PUB_KEY: &'static str = if Configuration::test() {
+
+    // for staging and local environments, use the test auth public key
+    // for production, use the main auth public key
+    pub static ref AUTH_PUB_KEY: &'static str = if Configuration::staging() || Configuration::local() {
         TEST_AUTH_PUB_KEY
     } else {
         MAIN_AUTH_PUB_KEY
@@ -87,20 +94,23 @@ async fn main() {
         };
     }
 
-    if Configuration::test() {
-        info!("Package is running in test mode");
+    if Configuration::staging() {
+        info!("Package is running in staging mode");
+    }
+    if Configuration::local() {
+        info!("Package is running in local mode");
     }
 
     let auth_pub_k: Secp256k1PublicKey = AUTH_PUB_KEY.parse().expect("Invalid public key");
 
     let pool_addresses = Configuration::pool_address()
+        .await
         .filter(|p| !p.is_empty())
-        .unwrap_or_else(|| {
-            if Configuration::test() {
-                panic!("Test pool address is missing");
-            } else {
-                panic!("Pool address is missing");
-            }
+        .unwrap_or_else(|| match Configuration::environment().as_str() {
+            "staging" => panic!("Staging pool address is missing"),
+            "local" => panic!("Local pool address is missing"),
+            "production" => panic!("Pool address is missing"),
+            _ => unreachable!(),
         });
 
     let mut router = router::Router::new(pool_addresses, auth_pub_k, None, None);
