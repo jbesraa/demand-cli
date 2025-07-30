@@ -43,7 +43,8 @@ const REPO_OWNER: &str = "demand-open-source";
 const REPO_NAME: &str = "demand-cli";
 const BIN_NAME: &str = "demand-cli";
 const STAGING_URL: &str = "https://staging-user-dashboard-server.dmnd.work";
-const LOCAL_URL: &str = "http://localhost:8787/api";
+const LOCAL_URL: &str = "http://localhost:8787";
+const TESTNET3_URL: &str = "https://testnet3-user-dashboard-server.dmnd.work";
 const PRODUCTION_URL: &str = "https://production-user-dashboard-server.dmnd.work";
 
 lazy_static! {
@@ -61,7 +62,7 @@ lazy_static! {
 
     // for staging and local environments, use the test auth public key
     // for production, use the main auth public key
-    pub static ref AUTH_PUB_KEY: &'static str = if Configuration::staging() || Configuration::local() {
+    pub static ref AUTH_PUB_KEY: &'static str = if Configuration::staging() || Configuration::local() || Configuration::testnet3() {
         TEST_AUTH_PUB_KEY
     } else {
         MAIN_AUTH_PUB_KEY
@@ -100,6 +101,9 @@ async fn main() {
     if Configuration::local() {
         info!("Package is running in local mode");
     }
+    if Configuration::testnet3() {
+        info!("Package is running in testnet3 mode");
+    }
 
     let auth_pub_k: Secp256k1PublicKey = AUTH_PUB_KEY.parse().expect("Invalid public key");
 
@@ -108,6 +112,7 @@ async fn main() {
         .filter(|p| !p.is_empty())
         .unwrap_or_else(|| match Configuration::environment().as_str() {
             "staging" => panic!("Staging pool address is missing"),
+            "testnet3" => panic!("Testnet3 pool address is missing"),
             "local" => panic!("Local pool address is missing"),
             "production" => panic!("Pool address is missing"),
             _ => unreachable!(),

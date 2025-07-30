@@ -8,7 +8,10 @@ use std::{
 };
 use tracing::{debug, error, info, warn};
 
-use crate::{shared::error::Error, HashUnit, DEFAULT_SV1_HASHPOWER, PRODUCTION_URL, STAGING_URL};
+use crate::{
+    shared::error::Error, HashUnit, DEFAULT_SV1_HASHPOWER, PRODUCTION_URL, STAGING_URL,
+    TESTNET3_URL,
+};
 lazy_static! {
     pub static ref CONFIG: Configuration = Configuration::load_config();
 }
@@ -16,6 +19,8 @@ lazy_static! {
 struct Args {
     #[clap(long)]
     staging: bool,
+    #[clap(long)]
+    testnet3: bool,
     #[clap(long)]
     local: bool,
     #[clap(long = "d", short = 'd', value_parser = parse_hashrate)]
@@ -58,6 +63,7 @@ struct ConfigFile {
     sv1_log: Option<bool>,
     staging: Option<bool>,
     local: Option<bool>,
+    testnet3: Option<bool>,
     listening_addr: Option<String>,
     api_server_port: Option<String>,
     monitor: Option<bool>,
@@ -76,6 +82,7 @@ impl ConfigFile {
             nc_loglevel: None,
             sv1_log: None,
             staging: None,
+            testnet3: None,
             local: None,
             listening_addr: None,
             api_server_port: None,
@@ -95,6 +102,7 @@ pub struct Configuration {
     nc_loglevel: String,
     sv1_log: bool,
     staging: bool,
+    testnet3: bool,
     local: bool,
     listening_addr: Option<String>,
     api_server_port: String,
@@ -177,6 +185,10 @@ impl Configuration {
         CONFIG.local
     }
 
+    pub fn testnet3() -> bool {
+        CONFIG.testnet3
+    }
+
     /// Returns the environment based on the configuration.
     /// Possible values: "staging", "local", "production".
     /// If no environment is set, it defaults to "production".
@@ -185,6 +197,8 @@ impl Configuration {
             "staging".to_string()
         } else if CONFIG.local {
             "local".to_string()
+        } else if CONFIG.testnet3 {
+            "testnet3".to_string()
         } else {
             "production".to_string()
         }
@@ -291,6 +305,8 @@ impl Configuration {
 
         let staging =
             args.staging || config.staging.unwrap_or(false) || std::env::var("STAGING").is_ok();
+        let testnet3 =
+            args.testnet3 || config.testnet3.unwrap_or(false) || std::env::var("TESTNET3").is_ok();
         let local = args.local || config.local.unwrap_or(false) || std::env::var("LOCAL").is_ok();
         let monitor =
             args.monitor || config.monitor.unwrap_or(false) || std::env::var("MONITOR").is_ok();
@@ -309,6 +325,7 @@ impl Configuration {
             nc_loglevel,
             sv1_log,
             staging,
+            testnet3,
             local,
             listening_addr,
             api_server_port,
@@ -351,23 +368,36 @@ fn parse_hashrate(hashrate_str: &str) -> Result<f32, String> {
     Ok(hashrate)
 }
 
-fn parse_address(addr: String) -> SocketAddr {
-    addr.to_socket_addrs()
-        .map_err(|e| error!("Invalid socket address: {}", e))
-        .expect("Failed to parse socket address")
-        .next()
-        .expect("No socket address resolved")
+fn parse_address(addr: String) -> Option<SocketAddr> {
+    match addr.to_socket_addrs() {
+        Ok(mut addrs) => match addrs.next() {
+            Some(socket_addr) => Some(socket_addr),
+            None => {
+                error!("Failed to parse address: {}", addr);
+                None
+            }
+        },
+        Err(e) => {
+            error!("Failed to parse address '{}': {}", addr, e);
+            None
+        }
+    }
 }
 
 /// Fetches pool URLs from the server based on the environment.
 async fn fetch_pool_urls() -> Result<Vec<SocketAddr>, Error> {
     if CONFIG.local {
-        return Ok(vec![parse_address("127.0.0.1:20000".to_string())]);
+        return Ok(vec![
+            parse_address("127.0.0.1:20000".to_string()).expect("Invalid local address")
+        ]);
     };
 
     let url = if CONFIG.staging {
         info!("Fetching pool URLs from staging server: {}", STAGING_URL);
         STAGING_URL
+    } else if CONFIG.testnet3 {
+        info!("Fetching pool URLs from testnet server: {}", TESTNET3_URL);
+        TESTNET3_URL
     } else {
         info!(
             "Fetching pool URLs from production server: {}",
@@ -403,10 +433,10 @@ async fn fetch_pool_urls() -> Result<Vec<SocketAddr>, Error> {
     // Parse the addresses into SocketAddr
     let socket_addrs: Vec<SocketAddr> = addresses
         .into_iter()
-        .map(|addr| {
+        .filter_map(|addr| {
             let address = format!("{}:{}", addr.host, addr.port);
             parse_address(address)
-        })
+        }) // Filter out any None values
         .collect();
     debug!("Pool addresses: {:?}", socket_addrs);
     Ok(socket_addrs)
