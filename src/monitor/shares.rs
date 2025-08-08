@@ -1,27 +1,12 @@
-use reqwest::Url;
 use roles_logic_sv2::utils::Mutex;
-use serde_json::json;
 use std::sync::Arc;
 use tracing::{debug, error};
 const BATCH_SIZE: u32 = 20; // Default batch size for sending shares
 
 use crate::{
-    config::Configuration,
+    monitor::{shares_server_endpoint, MonitorAPI},
     proxy_state::{DownstreamType, ProxyState},
-    shared::error::Error,
-    LOCAL_URL, PRODUCTION_URL, STAGING_URL, TESTNET3_URL,
 };
-
-fn monitoring_server_url() -> String {
-    // Determine the monitoring server URL based on the environment
-    match Configuration::environment().as_str() {
-        "staging" => format!("{}/api/share/save", STAGING_URL),
-        "testnet3" => format!("{}/api/share/save", TESTNET3_URL),
-        "local" => format!("{}/api/share/save", LOCAL_URL),
-        "production" => format!("{}/api/share/save", PRODUCTION_URL),
-        _ => unreachable!(),
-    }
-}
 
 #[derive(serde::Serialize, Clone, Debug)]
 pub struct ShareInfo {
@@ -103,7 +88,7 @@ impl SharesMonitor {
 
     /// Monitors the pending shares and sends them to the monitoring server in batches.
     pub async fn monitor(&self) {
-        let api = MonitorAPI::new(monitoring_server_url());
+        let api = MonitorAPI::new(shares_server_endpoint());
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60)); // Check every 60 seconds
         interval.tick().await; // Skip the first tick to avoid unnecessary error log
         loop {
@@ -129,42 +114,6 @@ impl SharesMonitor {
                 }
             } else {
                 error!("No pending shares to send");
-            }
-        }
-    }
-}
-
-struct MonitorAPI {
-    url: Url,
-    client: reqwest::Client,
-}
-
-impl MonitorAPI {
-    fn new(url: String) -> Self {
-        let client = reqwest::Client::new();
-        MonitorAPI {
-            url: url.parse().expect("Invalid URL"),
-            client,
-        }
-    }
-
-    /// Sends a batch of shares to the monitoring server.
-    async fn send_shares(&self, shares: Vec<ShareInfo>) -> Result<(), Error> {
-        let token = crate::config::Configuration::token().expect("Token is not set");
-
-        debug!("Sending batch of {} shares to API", shares.len());
-        let response = self
-            .client
-            .post(self.url.clone())
-            .json(&json!({ "shares": shares, "token": token }))
-            .send()
-            .await?;
-
-        match response.error_for_status() {
-            Ok(_) => Ok(()),
-            Err(err) => {
-                error!("Failed to send shares: {}", err);
-                Err(err.into())
             }
         }
     }

@@ -1,12 +1,12 @@
 #[cfg(not(target_os = "windows"))]
 use jemallocator::Jemalloc;
 use router::Router;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
 #[cfg(not(target_os = "windows"))]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
-use crate::shared::utils::AbortOnDrop;
+use crate::{monitor::logs::SendLogLayer, shared::utils::AbortOnDrop};
 use config::Configuration;
 use key_utils::Secp256k1PublicKey;
 use lazy_static::lazy_static;
@@ -21,11 +21,11 @@ mod config;
 mod ingress;
 pub mod jd_client;
 mod minin_pool_connection;
+mod monitor;
 mod proxy_state;
 mod router;
 mod share_accounter;
 mod shared;
-mod shares_monitor;
 mod translator;
 
 const TRANSLATOR_BUFFER_SIZE: usize = 32;
@@ -74,15 +74,18 @@ async fn main() {
     let log_level = Configuration::loglevel();
     let noise_connection_log_level = Configuration::nc_loglevel();
 
+    let remote_layer = SendLogLayer::new();
+    let console_layer =
+        tracing_subscriber::fmt::layer().with_filter(tracing_subscriber::EnvFilter::new(format!(
+            "{},demand_sv2_connection::noise_connection_tokio={}",
+            log_level, noise_connection_log_level
+        )));
     //Disable noise_connection error (for now) because:
     // 1. It produce logs that are not very user friendly and also bloat the logs
     // 2. The errors resulting from noise_connection are handled. E.g if unrecoverable error from noise connection occurs during Pool connection: We either retry connecting immediatley or we update Proxy state to Pool Down
     tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .with(tracing_subscriber::EnvFilter::new(format!(
-            "{},demand_sv2_connection::noise_connection_tokio={}",
-            log_level, noise_connection_log_level
-        )))
+        .with(console_layer)
+        .with(remote_layer)
         .init();
 
     Configuration::token().expect("TOKEN is not set");

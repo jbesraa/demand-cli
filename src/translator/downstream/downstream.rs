@@ -1,8 +1,8 @@
 use crate::{
     api::stats::StatsSender,
+    monitor::shares::{RejectionReason, ShareInfo, SharesMonitor},
     proxy_state::{DownstreamType, ProxyState},
     shared::utils::AbortOnDrop,
-    shares_monitor::{RejectionReason, ShareInfo, SharesMonitor},
     translator::{error::Error, utils::validate_share},
 };
 
@@ -381,7 +381,7 @@ impl Downstream {
         stats_sender: StatsSender,
         first_job: Notify<'static>,
     ) -> Self {
-        use crate::shares_monitor::SharesMonitor;
+        use crate::monitor::shares::SharesMonitor;
 
         Downstream {
             connection_id,
