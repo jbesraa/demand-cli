@@ -196,7 +196,7 @@ impl Router {
         let auth_pub_key = self.auth_pub_k;
 
         tokio::time::timeout(
-            Duration::from_secs(15),
+            Duration::from_secs(8),
             PoolLatency::get_mining_setup_latencies(
                 &mut pool,
                 setup_connection_msg.cloned(),
