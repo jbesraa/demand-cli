@@ -1,7 +1,6 @@
 use roles_logic_sv2::utils::Mutex;
 use std::sync::Arc;
 use tracing::{debug, error};
-const BATCH_SIZE: u32 = 20; // Default batch size for sending shares
 
 use crate::{
     monitor::{shares_server_endpoint, MonitorAPI},
@@ -13,7 +12,8 @@ pub struct ShareInfo {
     worker_name: String,
     difficulty: Option<f32>,
     job_id: i64,
-    rejection_reason: Option<RejectionReason>, // if None, the share was accepted
+    // if None, the share was accepted
+    rejection_reason: Option<RejectionReason>,
     timestamp: u64,
 }
 
@@ -40,14 +40,12 @@ impl ShareInfo {
 #[derive(Debug, Clone)]
 pub struct SharesMonitor {
     pending_shares: Arc<Mutex<Vec<ShareInfo>>>,
-    batch_size: u32,
 }
 
 impl SharesMonitor {
     pub fn new() -> Self {
         SharesMonitor {
             pending_shares: Arc::new(Mutex::new(Vec::new())),
-            batch_size: BATCH_SIZE,
         }
     }
 
@@ -95,23 +93,15 @@ impl SharesMonitor {
             interval.tick().await;
             let shares_to_send = self.get_pending_shares();
             if !shares_to_send.is_empty() {
-                if shares_to_send.len() >= self.batch_size as usize {
-                    match api.send_shares(shares_to_send.clone()).await {
-                        Ok(_) => {
-                            debug!("Successfully sent Shares: {:?} to API", &shares_to_send);
-                        }
-                        Err(err) => {
-                            error!("Failed to send shares: {}", err);
-                        }
+                match api.send_shares(shares_to_send.clone()).await {
+                    Ok(_) => {
+                        debug!("Successfully sent Shares: {:?} to API", &shares_to_send);
                     }
-                    self.clear_pending_shares(); // Clear after sending
-                } else {
-                    debug!(
-                        "Current shares count ({}) is less than batch size ({}), waiting for more",
-                        shares_to_send.len(),
-                        self.batch_size
-                    );
+                    Err(err) => {
+                        error!("Failed to send shares: {}", err);
+                    }
                 }
+                self.clear_pending_shares(); // Clear after sending
             } else {
                 error!("No pending shares to send");
             }
