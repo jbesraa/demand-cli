@@ -212,21 +212,6 @@ impl Router {
             );
         })??;
 
-        if (PoolLatency::get_mining_setup_latencies(
-            &mut pool,
-            setup_connection_msg.cloned(),
-            timer.cloned(),
-            auth_pub_key,
-        )
-        .await)
-            .is_err()
-        {
-            error!(
-                "Failed to get mining setup latencies for: {:?}",
-                pool_address
-            );
-            return Err(());
-        }
         if (PoolLatency::get_jd_latencies(&mut pool, auth_pub_key).await).is_err() {
             error!("Failed to get jd setup latencies for: {:?}", pool_address);
             return Err(());
