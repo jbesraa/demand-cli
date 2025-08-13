@@ -337,6 +337,7 @@ impl Configuration {
 
 /// Parses a hashrate string (e.g., "10T", "2.5P", "500E") into an f32 value in h/s.
 fn parse_hashrate(hashrate_str: &str) -> Result<f32, String> {
+    info!("Received hashrate: '{}'", hashrate_str);
     let hashrate_str = hashrate_str.trim();
     if hashrate_str.is_empty() {
         return Err("Hashrate cannot be empty. Expected format: '<number><unit>' (e.g., '10T', '2.5P', '5E'".to_string());
@@ -364,7 +365,7 @@ fn parse_hashrate(hashrate_str: &str) -> Result<f32, String> {
     if hashrate.is_infinite() || hashrate.is_nan() {
         return Err("Hashrate too large or invalid".to_string());
     }
-
+    info!("Parsed hashrate: {} h/s", hashrate);
     Ok(hashrate)
 }
 
@@ -436,9 +437,10 @@ async fn fetch_pool_urls() -> Result<Vec<SocketAddr>, Error> {
         .filter_map(|addr| {
             let address = format!("{}:{}", addr.host, addr.port);
             parse_address(address)
-        }) // Filter out any None values
+        }) // Filter out any None values, i.e., invalid addresses
         .collect();
-    debug!("Pool addresses: {:?}", socket_addrs);
+    info!("Found {} pool addresses", socket_addrs.len());
+    info!("Pool addresses: {:?}", &socket_addrs);
     Ok(socket_addrs)
 }
 
