@@ -5,6 +5,7 @@ use serde_json::json;
 use std::{
     net::{SocketAddr, ToSocketAddrs},
     path::PathBuf,
+    time::Duration,
 };
 use tracing::{debug, error, info, warn};
 
@@ -388,37 +389,41 @@ fn parse_address(addr: String) -> Option<SocketAddr> {
 /// Fetches pool URLs from the server based on the environment.
 async fn fetch_pool_urls() -> Result<Vec<SocketAddr>, Error> {
     if CONFIG.local {
+        info!("Running in local mode, using hardcoded address 127.0.0.1:20000");
         return Ok(vec![
             parse_address("127.0.0.1:20000".to_string()).expect("Invalid local address")
         ]);
     };
-
     let url = if CONFIG.staging {
-        info!("Fetching pool URLs from staging server: {}", STAGING_URL);
         STAGING_URL
     } else if CONFIG.testnet3 {
-        info!("Fetching pool URLs from testnet server: {}", TESTNET3_URL);
         TESTNET3_URL
     } else {
-        info!(
-            "Fetching pool URLs from production server: {}",
-            PRODUCTION_URL
-        );
         PRODUCTION_URL
     };
     let endpoint = format!("{}/api/pool/urls", url);
+    info!("Fetching pool URLs from: {}", endpoint);
     let token = Configuration::token().expect("TOKEN is not set");
+    let mut retries = 8;
+    let client = reqwest::Client::new();
 
-    let response = match reqwest::Client::new()
-        .post(endpoint)
-        .json(&json!({"token": token}))
-        .send()
-        .await
-    {
-        Ok(resp) => resp,
-        Err(e) => {
-            error!("Failed to fetch pool urls: {}", e);
-            return Err(Error::from(e));
+    let response = loop {
+        let request = client
+            .post(endpoint.clone())
+            .json(&json!({"token": token}))
+            .timeout(Duration::from_secs(15));
+
+        match request.send().await {
+            Ok(resp) => break resp,
+            Err(e) => {
+                error!("Failed to fetch pool urls: {}", e);
+                if retries == 0 {
+                    return Err(Error::from(e));
+                }
+                retries -= 1;
+                info!("Retrying in 3 seconds...");
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
         }
     };
 
