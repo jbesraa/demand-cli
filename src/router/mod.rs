@@ -196,7 +196,7 @@ impl Router {
         let auth_pub_key = self.auth_pub_k;
 
         tokio::time::timeout(
-            Duration::from_secs(15),
+            Duration::from_secs(8),
             PoolLatency::get_mining_setup_latencies(
                 &mut pool,
                 setup_connection_msg.cloned(),
@@ -212,21 +212,6 @@ impl Router {
             );
         })??;
 
-        if (PoolLatency::get_mining_setup_latencies(
-            &mut pool,
-            setup_connection_msg.cloned(),
-            timer.cloned(),
-            auth_pub_key,
-        )
-        .await)
-            .is_err()
-        {
-            error!(
-                "Failed to get mining setup latencies for: {:?}",
-                pool_address
-            );
-            return Err(());
-        }
         if (PoolLatency::get_jd_latencies(&mut pool, auth_pub_key).await).is_err() {
             error!("Failed to get jd setup latencies for: {:?}", pool_address);
             return Err(());

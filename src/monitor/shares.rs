@@ -1,7 +1,6 @@
 use roles_logic_sv2::utils::Mutex;
 use std::sync::Arc;
-use tracing::{debug, error};
-const BATCH_SIZE: u32 = 20; // Default batch size for sending shares
+use tracing::{error, info, warn};
 
 use crate::{
     monitor::{shares_server_endpoint, MonitorAPI},
@@ -13,7 +12,8 @@ pub struct ShareInfo {
     worker_name: String,
     difficulty: Option<f32>,
     job_id: i64,
-    rejection_reason: Option<RejectionReason>, // if None, the share was accepted
+    // if None, the share was accepted
+    rejection_reason: Option<RejectionReason>,
     timestamp: u64,
 }
 
@@ -39,21 +39,19 @@ impl ShareInfo {
 
 #[derive(Debug, Clone)]
 pub struct SharesMonitor {
-    pending_shares: Arc<Mutex<Vec<ShareInfo>>>,
-    batch_size: u32,
+    shares: Arc<Mutex<Vec<ShareInfo>>>,
 }
 
 impl SharesMonitor {
     pub fn new() -> Self {
         SharesMonitor {
-            pending_shares: Arc::new(Mutex::new(Vec::new())),
-            batch_size: BATCH_SIZE,
+            shares: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
     /// Inserts a new share into the pending shares list.
     pub fn insert_share(&self, share: ShareInfo) {
-        self.pending_shares
+        self.shares
             .safe_lock(|event| {
                 event.push(share);
             })
@@ -64,8 +62,8 @@ impl SharesMonitor {
     }
 
     /// Retrieves the list of pending shares.
-    fn get_pending_shares(&self) -> Vec<ShareInfo> {
-        self.pending_shares
+    fn get_next_shares(&self) -> Vec<ShareInfo> {
+        self.shares
             .safe_lock(|event| event.clone())
             .unwrap_or_else(|e| {
                 error!("Failed to lock pending shares: {:?}", e);
@@ -75,8 +73,8 @@ impl SharesMonitor {
     }
 
     /// Clears the list of pending shares.
-    fn clear_pending_shares(&self) {
-        self.pending_shares
+    fn clear_next_shares(&self) {
+        self.shares
             .safe_lock(|event| {
                 event.clear();
             })
@@ -86,34 +84,29 @@ impl SharesMonitor {
             });
     }
 
-    /// Monitors the pending shares and sends them to the monitoring server in batches.
     pub async fn monitor(&self) {
         let api = MonitorAPI::new(shares_server_endpoint());
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60)); // Check every 60 seconds
-        interval.tick().await; // Skip the first tick to avoid unnecessary error log
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        // First tick completes immediately
+        interval.tick().await;
         loop {
             interval.tick().await;
-            let shares_to_send = self.get_pending_shares();
+            let shares_to_send = self.get_next_shares();
             if !shares_to_send.is_empty() {
-                if shares_to_send.len() >= self.batch_size as usize {
-                    match api.send_shares(shares_to_send.clone()).await {
-                        Ok(_) => {
-                            debug!("Successfully sent Shares: {:?} to API", &shares_to_send);
-                        }
-                        Err(err) => {
-                            error!("Failed to send shares: {}", err);
-                        }
+                match api.send_shares(shares_to_send.clone()).await {
+                    Ok(_) => {
+                        info!(
+                            "Saved {} shares to the monitoring server",
+                            shares_to_send.len()
+                        );
+                        self.clear_next_shares();
                     }
-                    self.clear_pending_shares(); // Clear after sending
-                } else {
-                    debug!(
-                        "Current shares count ({}) is less than batch size ({}), waiting for more",
-                        shares_to_send.len(),
-                        self.batch_size
-                    );
+                    Err(err) => {
+                        warn!("Failed to send shares, this does not affect mining but may cause issues with monitoring: {:?}", err);
+                    }
                 }
             } else {
-                error!("No pending shares to send");
+                warn!("No pending shares to send. If this happens frequently, check your miner.");
             }
         }
     }
