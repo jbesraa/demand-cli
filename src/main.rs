@@ -147,7 +147,6 @@ async fn initialize_proxy(
                     );
                     let secs = 5;
                     tokio::time::sleep(Duration::from_secs(secs)).await;
-                    // Restart loop, esentially restarting proxy
                     continue;
                 }
             };
