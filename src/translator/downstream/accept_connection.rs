@@ -103,7 +103,7 @@ pub async fn start_accept_connection(
                         .await
                     }
                     Err(e) => {
-                        error!("{e:?}");
+                        error!("Error opening connection for ip: {}: {}", addr, e);
                         ProxyState::update_downstream_state(DownstreamType::TranslatorDownstream);
                         break;
                     }

@@ -66,7 +66,9 @@ impl Router {
         let mut least_latency = Duration::MAX;
 
         for &pool_addr in &self.pool_addresses {
+            info!("Checking latency for pool: {:?}", pool_addr);
             if let Ok(latency) = self.get_latency(pool_addr).await {
+                info!("Latency for pool {:?} is {:?}", pool_addr, latency);
                 if latency < least_latency {
                     least_latency = latency;
                     best_pool = Some(pool_addr)
@@ -96,6 +98,7 @@ impl Router {
             self.latency_tx.send_replace(Some(latency)); // update latency
             Some(pool)
         } else {
+            error!("No pools available or all pools failed to connect");
             None
         }
     }

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use sv1_api::{client_to_server::Submit, json_rpc};
 use tokio::sync::mpsc;
 use tokio::task;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 
 pub async fn start_receive_downstream(
     task_manager: Arc<Mutex<TaskManager>>,
@@ -16,6 +16,7 @@ pub async fn start_receive_downstream(
     mut recv_from_down: mpsc::Receiver<String>,
     connection_id: u32,
 ) -> Result<(), Error<'static>> {
+    info!("Starting sv1 downstream reader {}", connection_id);
     let task_manager_clone = task_manager.clone();
     let handle = task::spawn(async move {
         while let Some(incoming) = recv_from_down.recv().await {
@@ -23,18 +24,26 @@ pub async fn start_receive_downstream(
             if let Ok(incoming) = incoming {
                 // if message is Submit Shares update difficulty management
                 if let sv1_api::Message::StandardRequest(standard_req) = incoming.clone() {
+                    info!(
+                        "Received sv1 msg from downstream {}: {:?}",
+                        connection_id, standard_req
+                    );
                     if let Ok(Submit { .. }) = standard_req.try_into() {
                         if let Err(e) = Downstream::save_share(downstream.clone()) {
-                            error!("{}", e);
+                            error!("Failed to save share: {}", e);
                             break;
                         }
                     }
                 }
 
+                info!("Handle incoming sv1 msg from downstream {}", connection_id);
                 if let Err(error) =
                     Downstream::handle_incoming_sv1(downstream.clone(), incoming).await
                 {
-                    error!("Failed to handle incoming sv1 msg: {:?}", error);
+                    error!(
+                        "Failed to handle incoming sv1 msg from downstream {}: {:?}",
+                        connection_id, error
+                    );
                     ProxyState::update_downstream_state(DownstreamType::TranslatorDownstream);
                 };
             } else {

@@ -134,6 +134,7 @@ async fn initialize_proxy(
     mut pool_addr: Option<std::net::SocketAddr>,
     epsilon: Duration,
 ) {
+    info!("Starting proxy...");
     loop {
         let stats_sender = api::stats::StatsSender::new();
         let (send_to_pool, recv_from_pool, pool_connection_abortable) =

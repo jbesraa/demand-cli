@@ -137,6 +137,7 @@ impl Downstream {
         initial_difficulty: f32,
         stats_sender: StatsSender,
     ) {
+        info!("Creating new downstream connection: {}", connection_id);
         assert!(last_notify.is_some());
 
         let (tx_outgoing, receiver_outgoing) = channel(crate::TRANSLATOR_BUFFER_SIZE);
@@ -170,8 +171,16 @@ impl Downstream {
         pid.p(pk, f32::MAX).i(0.0, f32::MAX).d(0.0, f32::MAX);
 
         let estimated_downstream_hash_rate = *crate::EXPECTED_SV1_HASHPOWER;
+        info!(
+            "Estimated downstream hash rate for connection {} is {} H/s",
+            connection_id, estimated_downstream_hash_rate
+        );
         let mut current_difficulties = VecDeque::with_capacity(3);
         current_difficulties.push_back(initial_difficulty);
+        info!(
+            "Initial difficulty for connection {} is {}",
+            connection_id, initial_difficulty
+        );
 
         let difficulty_mgmt = DownstreamDifficultyConfig {
             estimated_downstream_hash_rate,
