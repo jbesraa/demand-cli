@@ -195,11 +195,13 @@ impl Bridge {
         mut rx_sv1_downstream: tokio::sync::mpsc::Receiver<DownstreamMessages>,
     ) -> JoinHandle<()> {
         tokio::task::spawn(async move {
-            loop {
+            'outer: loop {
                 let msg = match rx_sv1_downstream.recv().await {
                     Some(msg) => msg,
                     None => {
                         error!("Failed to receive message from downstream");
+                        error!("The downstream channel has been closed");
+                        error!("Updating translator state to Down, shutting down proxy");
                         ProxyState::update_translator_state(TranslatorState::Down);
                         break;
                     }
@@ -207,20 +209,45 @@ impl Bridge {
 
                 match msg {
                     DownstreamMessages::SubmitShares(share) => {
-                        if let Err(e) = Self::handle_submit_shares(self_.clone(), share).await {
+                        if let Err(e) =
+                            Self::handle_submit_shares(self_.clone(), share.clone()).await
+                        {
                             error!("Failed to handle SubmitShareWithChannelId: {e}");
-                            ProxyState::update_translator_state(TranslatorState::Down);
-                            break;
+                            error!("Failed share: {:#?}", share.share);
+                            // TODO: Count the number of invalid shares received in a specific
+                            // timeframe, and if they are too many, set the translator state to
+                            // Down
                         }
                     }
                     DownstreamMessages::SetDownstreamTarget(new_target) => {
-                        if let Err(e) =
-                            Self::handle_update_downstream_target(self_.clone(), new_target)
-                        {
-                            error!("Failed to handle SetDownstreamTarget: {e}");
-                            ProxyState::update_translator_state(TranslatorState::Down);
-                            break;
-                        };
+                        let mut try_num = 3;
+                        while try_num > 0 {
+                            try_num -= 1;
+                            match Self::handle_update_downstream_target(
+                                self_.clone(),
+                                new_target.clone(),
+                            ) {
+                                Ok(_) => {
+                                    info!(
+                                        "Successfully updated downstream target for channel {}",
+                                        new_target.channel_id
+                                    );
+                                    break;
+                                }
+                                Err(e) => {
+                                    error!("Fatal internal error");
+                                    error!("Failed to update downstream target: {e}");
+                                    if try_num == 0 {
+                                        error!("Failed to update downstream target after 3 attempts, shutting down proxy");
+                                        ProxyState::update_translator_state(TranslatorState::Down);
+                                        break 'outer;
+                                    } else {
+                                        warn!("Retrying to update downstream target, {} attempts left", try_num);
+                                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                                    }
+                                }
+                            }
+                        }
                     }
                 };
             }
