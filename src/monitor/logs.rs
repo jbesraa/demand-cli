@@ -1,7 +1,7 @@
 use crate::monitor::{proxy_log_server_endpoint, MonitorAPI};
 use serde::Serialize;
 use std::sync::Arc;
-use tracing::error;
+use tracing::{error, trace};
 
 /// A custom tracing Layer that sends error logs to the server.
 ///
@@ -56,7 +56,8 @@ where
             // Spawn a new task to send the log asynchronously
             tokio::spawn(async move {
                 if let Err(e) = api.send_log(payload.as_ref().clone()).await {
-                    error!("Failed to send log to API: {}", e);
+                    // TODO:  Maybe this should be error!
+                    trace!("Failed to send log to API: {}", e);
                 }
             });
         }

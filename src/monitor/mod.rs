@@ -80,10 +80,7 @@ impl MonitorAPI {
 
         match response.error_for_status() {
             Ok(_) => Ok(()),
-            Err(err) => {
-                error!("Failed to send log: {}", err);
-                Err(err.into())
-            }
+            Err(err) => Err(err.into()),
         }
     }
 }
