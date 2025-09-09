@@ -239,7 +239,8 @@ async fn initialize_proxy(
             abort_handles.push((jdc_handle, "jdc".to_string()));
         }
         let server_handle = tokio::spawn(api::start(router.clone(), stats_sender));
-        match monitor(router, abort_handles, epsilon, server_handle).await {
+        abort_handles.push((server_handle.into(), "api_server".to_string()));
+        match monitor(router, abort_handles, epsilon).await {
             Reconnect::NewUpstream(new_pool_addr) => {
                 ProxyState::update_proxy_state_up();
                 pool_addr = Some(new_pool_addr);
@@ -258,7 +259,6 @@ async fn monitor(
     router: &mut Router,
     abort_handles: Vec<(AbortOnDrop, std::string::String)>,
     epsilon: Duration,
-    server_handle: tokio::task::JoinHandle<()>,
 ) -> Reconnect {
     let mut should_check_upstreams_latency = 0;
     loop {
@@ -269,7 +269,6 @@ async fn monitor(
                 if let Some(new_upstream) = router.monitor_upstream(epsilon).await {
                     info!("Faster upstream detected. Reinitializing proxy...");
                     drop(abort_handles);
-                    server_handle.abort(); // abort server
 
                     // Needs a little to time to drop
                     tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -288,7 +287,6 @@ async fn monitor(
             for (handle, _name) in abort_handles {
                 drop(handle);
             }
-            server_handle.abort(); // abort server
 
             // Check if the proxy state is down, and if so, reinitialize the proxy.
             let is_proxy_down = ProxyState::is_proxy_down();
@@ -311,7 +309,6 @@ async fn monitor(
                 is_proxy_down.1.unwrap_or("Proxy".to_string())
             );
             drop(abort_handles); // Drop all abort handles
-            server_handle.abort(); // abort server
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await; // Needs a little to time to drop
             return Reconnect::NoUpstream;
         }
