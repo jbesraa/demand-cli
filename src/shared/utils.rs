@@ -6,23 +6,34 @@ use tokio::task::JoinHandle;
 
 #[derive(Debug)]
 pub struct AbortOnDrop {
-    abort_handle: AbortHandle,
+    abort_handle: Vec<AbortHandle>,
 }
 
 impl AbortOnDrop {
     pub fn new<T: Send + 'static>(handle: JoinHandle<T>) -> Self {
-        let abort_handle = handle.abort_handle();
+        let abort_handle = vec![handle.abort_handle()];
         Self { abort_handle }
     }
 
     pub fn is_finished(&self) -> bool {
-        self.abort_handle.is_finished()
+        for task in &self.abort_handle {
+            if !task.is_finished() {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub fn add_task<T: Send + 'static>(&mut self, handle: JoinHandle<T>) {
+        self.abort_handle.push(handle.abort_handle());
     }
 }
 
 impl core::ops::Drop for AbortOnDrop {
     fn drop(&mut self) {
-        self.abort_handle.abort()
+        for task in &self.abort_handle {
+            task.abort();
+        }
     }
 }
 
