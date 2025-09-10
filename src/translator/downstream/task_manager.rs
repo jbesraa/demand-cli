@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::shared::utils::AbortOnDrop;
+use crate::{proxy_state::ProxyState, shared::utils::AbortOnDrop};
 use roles_logic_sv2::utils::Mutex;
 use tokio::sync::mpsc;
 use tracing::warn;
@@ -15,23 +15,31 @@ enum Task {
     SharesMonitor(AbortOnDrop),
 }
 
+type TaskMessage = (Option<u32>, Task);
+
 pub struct TaskManager {
-    send_task: mpsc::Sender<(Option<u32>, Task)>,
+    send_task: mpsc::Sender<TaskMessage>,
     abort: Option<AbortOnDrop>,
-    tasks: Arc<Mutex<HashMap<Option<u32>, Vec<AbortOnDrop>>>>, // Track tasks by connection_id
+    pub send_kill_signal: mpsc::Sender<u32>,
 }
 
 impl TaskManager {
     pub fn initialize() -> Arc<Mutex<Self>> {
-        type TaskMessage = (Option<u32>, Task);
-
         let (sender, mut receiver): (mpsc::Sender<TaskMessage>, mpsc::Receiver<TaskMessage>) =
             mpsc::channel(10);
+        let (send_kill_signal, mut receiver_kill_signal) = mpsc::channel(10);
 
         let tasks = Arc::new(Mutex::new(HashMap::new()));
         let task_clone = tasks.clone();
         let handle = tokio::task::spawn(async move {
             while let Some((connection_id, task)) = receiver.recv().await {
+                // The tasks map is used to save task related to downstream managment, some of them
+                // are "global" in the sense that live for all the life of the transalator (like
+                // the task that create new downstreams when a downstream connect) others are
+                // specific to a downstream like the one that receive messages from it. Specific
+                // task have an id that is the connnection id, "global" ones do not have one; for
+                // that TaskMessage is an (Option<u32>, Task) where u32 is the connection id.
+                // "Global" tasks are saved in the map under the None key.
                 if task_clone
                     .safe_lock(|tasks| {
                         let tasks_list: &mut Vec<AbortOnDrop> =
@@ -48,10 +56,33 @@ impl TaskManager {
                 tokio::time::sleep(std::time::Duration::from_secs(1000)).await;
             }
         });
+        let kill_tasks = tokio::task::spawn(async move {
+            while let Some(connection_id) = receiver_kill_signal.recv().await {
+                if tasks
+                    .safe_lock(|tasks| {
+                        if let Some(handles) = tasks.remove(&Some(connection_id)) {
+                            for handle in handles {
+                                drop(handle);
+                            }
+                        }
+                    })
+                    .is_err()
+                {
+                    tracing::error!("TasKManager Mutex Poisoned");
+                    ProxyState::update_inconsistency(Some(1));
+                };
+                tracing::info!(
+                    "Aborted all tasks for downstream connection ID {}",
+                    connection_id
+                );
+            }
+        });
+        let mut aborter: AbortOnDrop = handle.into();
+        aborter.add_task(kill_tasks);
         Arc::new(Mutex::new(Self {
             send_task: sender,
-            abort: Some(handle.into()),
-            tasks,
+            abort: Some(aborter),
+            send_kill_signal,
         }))
     }
 
@@ -124,29 +155,7 @@ impl TaskManager {
             .await
             .map_err(|_| ())
     }
-
-    /// Kills all tasks for a given `connection_id` and removes them from TaskManager.
-    pub fn abort_tasks_for_connection_id(&mut self, connection_id: u32) {
-        if self
-            .tasks
-            .safe_lock(|tasks| {
-                if let Some(handles) = tasks.remove(&Some(connection_id)) {
-                    for handle in handles {
-                        drop(handle);
-                    }
-                }
-            })
-            .is_err()
-        {
-            tracing::error!("TasKManager Mutex Poisoned")
-        };
-        tracing::info!(
-            "Aborted all tasks for downstream connection ID {}",
-            connection_id
-        );
-    }
 }
-
 /// Converts a `Task` into its `AbortHandle` for task management.
 impl From<Task> for AbortOnDrop {
     fn from(task: Task) -> Self {
