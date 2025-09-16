@@ -7,7 +7,7 @@ use std::{
     path::PathBuf,
     time::Duration,
 };
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 use crate::{
     shared::error::Error, HashUnit, DEFAULT_SV1_HASHPOWER, PRODUCTION_URL, STAGING_URL,
@@ -50,6 +50,8 @@ struct Args {
     monitor: bool,
     #[clap(long, short = 'u')]
     auto_update: bool,
+    #[clap(long)]
+    signature: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -109,6 +111,7 @@ pub struct Configuration {
     api_server_port: String,
     monitor: bool,
     auto_update: bool,
+    signature: String,
 }
 impl Configuration {
     pub fn token() -> Option<String> {
@@ -213,6 +216,10 @@ impl Configuration {
         CONFIG.auto_update
     }
 
+    pub fn signature() -> String {
+        CONFIG.signature.clone()
+    }
+
     // Loads config from CLI, file, or env vars with precedence: CLI > file > env.
     fn load_config() -> Self {
         let args = Args::parse();
@@ -226,7 +233,23 @@ impl Configuration {
             .token
             .or(config.token)
             .or_else(|| std::env::var("TOKEN").ok());
-        debug!("User Token: {:?}", token);
+        println!("User Token: {:?}", token);
+
+        let signature = match args.signature {
+            Some(s) => {
+                if s.len() == 2 {
+                    println!("Signature provided: DDx{}", s);
+                    format!("DDx{}", s)
+                } else {
+                    println!("Invalid signature provided, using DDxDD");
+                    "DDxDD".to_string()
+                }
+            }
+            None => {
+                println!("Signature not provided, using DDxDD");
+                "DDxDD".to_string()
+            }
+        };
 
         let tp_address = args
             .tp_address
@@ -261,13 +284,13 @@ impl Configuration {
         let downstream_hashrate;
         if let Some(hashpower) = expected_hashrate {
             downstream_hashrate = hashpower;
-            info!(
+            println!(
                 "Using downstream hashrate: {}h/s",
                 HashUnit::format_value(hashpower)
             );
         } else {
             downstream_hashrate = DEFAULT_SV1_HASHPOWER;
-            warn!(
+            println!(
                 "No downstream hashrate provided, using default value: {}h/s",
                 HashUnit::format_value(DEFAULT_SV1_HASHPOWER)
             );
@@ -332,6 +355,7 @@ impl Configuration {
             api_server_port,
             monitor,
             auto_update,
+            signature,
         }
     }
 }
