@@ -1,5 +1,9 @@
 use super::{downstream::Downstream, task_manager::TaskManager};
-use crate::{proxy_state::ProxyState, translator::error::Error};
+use crate::{
+    monitor::worker_activity::{WorkerActivity, WorkerActivityType},
+    proxy_state::ProxyState,
+    translator::error::Error,
+};
 use roles_logic_sv2::utils::Mutex;
 use std::sync::Arc;
 use sv1_api::{client_to_server::Submit, json_rpc};
@@ -58,6 +62,31 @@ pub async fn start_receive_downstream(
             if let Err(e) = Downstream::remove_downstream_hashrate_from_channel(&downstream) {
                 error!("Failed to remove downstream hashrate from channel: {}", e)
             };
+
+            let (worker_name, user_agent) = downstream
+                .safe_lock(|d| {
+                    (
+                        d.authorized_names.first().cloned().unwrap_or_default(),
+                        d.user_agent.borrow().clone(),
+                    )
+                })
+                .unwrap_or_else(|e| {
+                    error!("Failed to lock downstream: {:?}", e);
+                    ProxyState::update_inconsistency(Some(1));
+                    ("unknown".to_string(), "unknown".to_string())
+                });
+
+            let worker_activity =
+                WorkerActivity::new(user_agent, worker_name, WorkerActivityType::Disconnected);
+
+            worker_activity
+                .monitor_api()
+                .send_worker_activity(worker_activity)
+                .await
+                .unwrap_or_else(|e| {
+                    error!("Failed to send worker activity: {}", e);
+                });
+
             // Apparently there is no way to make the compiler happy without unwrapping here. But
             // is not an issue since:
             // 1. the mutex should never get poisioned and if it does will be very very rare

@@ -1,6 +1,9 @@
 use crate::{
     api::stats::StatsSender,
-    monitor::shares::{RejectionReason, ShareInfo, SharesMonitor},
+    monitor::{
+        shares::{RejectionReason, ShareInfo, SharesMonitor},
+        worker_activity::{WorkerActivity, WorkerActivityType},
+    },
     proxy_state::{DownstreamType, ProxyState},
     shared::utils::AbortOnDrop,
     translator::{error::Error, utils::validate_share},
@@ -117,6 +120,7 @@ pub struct Downstream {
     pub recent_jobs: RecentJobs,
     pub first_job: Notify<'static>,
     pub share_monitor: SharesMonitor,
+    pub user_agent: std::cell::RefCell<String>, // RefCell is used here because `handle_subscribe` and `handle_authorize` take &self not &mut self and we need to mutate user_agent
 }
 
 impl Downstream {
@@ -197,6 +201,7 @@ impl Downstream {
             recent_jobs: RecentJobs::new(),
             first_job: last_notify.expect("we have an assertion at the beginning of this function"),
             share_monitor: SharesMonitor::new(),
+            user_agent: std::cell::RefCell::new(String::new()),
         }));
 
         if let Err(e) = start_receive_downstream(
@@ -399,6 +404,7 @@ impl Downstream {
             stats_sender,
             recent_jobs: RecentJobs::new(),
             share_monitor: SharesMonitor::new(),
+            user_agent: std::cell::RefCell::new(String::new()),
         }
     }
 }
@@ -446,12 +452,29 @@ impl IsServer<'static> for Downstream {
             "mining.notify".to_string(),
             "ae6812eb4cd7735a302a8a9dd95cf71f".to_string(),
         );
-
+        self.user_agent.replace(request.agent_signature.clone());
         vec![set_difficulty_sub, notify_sub]
     }
 
-    fn handle_authorize(&self, _request: &client_to_server::Authorize) -> bool {
+    fn handle_authorize(&self, request: &client_to_server::Authorize) -> bool {
         if self.authorized_names.is_empty() {
+            let user_agent = self.user_agent.borrow().clone();
+            let worker_activity = WorkerActivity::new(
+                user_agent,
+                request.name.clone(),
+                WorkerActivityType::Connected,
+            );
+
+            tokio::spawn(async move {
+                if let Err(e) = worker_activity
+                    .monitor_api()
+                    .send_worker_activity(worker_activity)
+                    .await
+                {
+                    error!("Failed to send worker activity: {}", e);
+                }
+            });
+
             true
         } else {
             // when downstream is already authorized we do not want return an ok response otherwise
