@@ -29,7 +29,7 @@ use tokio::{
     sync::mpsc::{Receiver as TReceiver, Sender as TSender},
     task,
 };
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use super::task_manager::TaskManager;
 use crate::{
@@ -86,6 +86,11 @@ pub struct Upstream {
     // than the configured percentage
     pub(super) difficulty_config: Arc<Mutex<UpstreamDifficultyConfig>>,
     pub sender: TSender<Mining<'static>>,
+    // Channel for downstream to communicate with upstream when it needs to open a new extended,
+    // String refers to the user_identity - in our case this is the user_id of the miner obtained
+    // from the token they enter in the MiningAuthorize sv1 message
+    tx_new_extended_channel: tokio::sync::mpsc::UnboundedSender<String>,
+    rx_new_extended_channel: tokio::sync::mpsc::UnboundedReceiver<String>,
 }
 
 impl PartialEq for Upstream {
@@ -110,6 +115,10 @@ impl Upstream {
         difficulty_config: Arc<Mutex<UpstreamDifficultyConfig>>,
         sender: TSender<Mining<'static>>,
     ) -> ProxyResult<'static, Arc<Mutex<Self>>> {
+        // Channel for downstream to communicate with upstream when it needs to open a new extended
+        // channel
+        let (tx_new_extended_channel, rx_new_extended_channel) =
+            tokio::sync::mpsc::unbounded_channel::<String>();
         Ok(Arc::new(Mutex::new(Self {
             extranonce_prefix: None,
             tx_sv2_set_new_prev_hash,
@@ -123,6 +132,8 @@ impl Upstream {
             target,
             difficulty_config,
             sender,
+            tx_new_extended_channel,
+            rx_new_extended_channel,
         })))
     }
 
@@ -130,14 +141,14 @@ impl Upstream {
         self_: Arc<Mutex<Self>>,
         incoming_receiver: TReceiver<Mining<'static>>,
         rx_sv2_submit_shares_ext: TReceiver<SubmitSharesExtended<'static>>,
-    ) -> Result<AbortOnDrop, Error<'static>> {
+    ) -> Result<(AbortOnDrop, tokio::sync::mpsc::UnboundedSender<String>), Error<'static>> {
         let task_manager = TaskManager::initialize();
         let abortable = task_manager
             .safe_lock(|t| t.get_aborter())
             .map_err(|_| Error::TranslatorTaskManagerMutexPoisoned)?
             .ok_or(Error::TranslatorTaskManagerFailed)?;
 
-        Self::connect(self_.clone()).await?; // Propagate error, it will be handled in the caller
+        Self::open_extended_channel_with_pool(self_.clone());
 
         let (diff_manager_abortable, main_loop_abortable) =
             Self::parse_incoming(self_.clone(), incoming_receiver)?;
@@ -154,37 +165,68 @@ impl Upstream {
             .await
             .map_err(|_| Error::TranslatorTaskManagerFailed)?;
 
-        Ok(abortable)
+        let tx_new_extended_channel = self_
+            .safe_lock(|s| s.tx_new_extended_channel.clone())
+            .map_err(|_| Error::TranslatorUpstreamMutexPoisoned)?;
+        Ok((abortable, tx_new_extended_channel))
     }
 
     /// Setups the connection with the SV2 Upstream role (most typically a SV2 Pool).
-    async fn connect(self_: Arc<Mutex<Self>>) -> ProxyResult<'static, ()> {
-        let sender = self_
-            .safe_lock(|s| s.sender.clone())
-            .map_err(|_e| Error::TranslatorUpstreamMutexPoisoned)?;
+    fn open_extended_channel_with_pool(self_: Arc<Mutex<Self>>) {
+        tokio::spawn(async move {
+            loop {
+                let user_identity = match self_
+                    .safe_lock(|s| s.rx_new_extended_channel.try_recv())
+                    .unwrap()
+                {
+                    Ok(id) => id,
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                        // No new requests — yield to allow other tasks to run
+                        tokio::task::yield_now().await;
+                        continue;
+                    }
+                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                        error!("rx_new_extended_channel disconnected — stopping upstream task");
+                        break;
+                    }
+                };
+                debug!(
+                    "Received request to open new extended channel with user_identity: {}",
+                    &user_identity
+                );
 
-        // Send open channel request
-        let nominal_hash_rate = self_
-            .safe_lock(|u| {
-                u.difficulty_config
-                    .safe_lock(|c| c.channel_nominal_hashrate)
-                    .map_err(|_e| Error::TranslatorDiffConfigMutexPoisoned)
-            })
-            .map_err(|_e| Error::TranslatorUpstreamMutexPoisoned)??;
-        let user_identity = "ABC".to_string().try_into().expect("Internal error: this operation can not fail because the string ABC can always be converted into Inner");
-        let open_channel = Mining::OpenExtendedMiningChannel(OpenExtendedMiningChannel {
-            request_id: 0, // TODO
-            user_identity, // TODO
-            nominal_hash_rate,
-            max_target: u256_max(),
-            min_extranonce_size: crate::MIN_EXTRANONCE2_SIZE,
+                let sender = self_
+                    .safe_lock(|s| s.sender.clone())
+                    .map_err(|_| Error::TranslatorUpstreamMutexPoisoned)
+                    .unwrap();
+
+                let nominal_hash_rate = self_
+                    .safe_lock(|u| {
+                        u.difficulty_config
+                            .safe_lock(|c| c.channel_nominal_hashrate)
+                            .map_err(|_| Error::TranslatorDiffConfigMutexPoisoned)
+                    })
+                    .map_err(|_| Error::TranslatorUpstreamMutexPoisoned)
+                    .unwrap()
+                    .unwrap();
+
+                let open_channel = Mining::OpenExtendedMiningChannel(OpenExtendedMiningChannel {
+                    request_id: 0, // TODO
+                    user_identity: user_identity
+                        .try_into()
+                        .expect("String is always convertible to Str0255<'decoder>"),
+                    nominal_hash_rate,
+                    max_target: u256_max(),
+                    min_extranonce_size: crate::MIN_EXTRANONCE2_SIZE,
+                });
+
+                // Send message
+                if sender.send(open_channel).await.is_err() {
+                    error!("Failed to send OpenExtendedMiningChannel message");
+                    break;
+                }
+            }
         });
-
-        if sender.send(open_channel).await.is_err() {
-            error!("Failed to send message");
-            return Err(Error::AsyncChannelError);
-        };
-        Ok(())
     }
 
     /// Parses the incoming SV2 message from the Upstream role and routes the message to the

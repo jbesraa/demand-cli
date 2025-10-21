@@ -24,6 +24,8 @@ pub async fn start_accept_connection(
     upstream_difficulty_config: Arc<Mutex<UpstreamDifficultyConfig>>,
     mut downstreams: Receiver<(Sender<String>, Receiver<String>, IpAddr)>,
     stats_sender: crate::api::stats::StatsSender,
+    tx_new_extended_channel: tokio::sync::mpsc::UnboundedSender<String>,
+
 ) -> Result<(), Error<'static>> {
     let handle = {
         let task_manager = task_manager.clone();

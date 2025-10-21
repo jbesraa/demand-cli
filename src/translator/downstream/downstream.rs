@@ -277,6 +277,7 @@ impl Downstream {
         upstream_difficulty_config: Arc<Mutex<UpstreamDifficultyConfig>>,
         downstreams: Receiver<(Sender<String>, Receiver<String>, IpAddr)>,
         stats_sender: StatsSender,
+        tx_new_extended_channel: tokio::sync::mpsc::UnboundedSender<String>,
     ) -> Result<AbortOnDrop, Error<'static>> {
         let task_manager = TaskManager::initialize();
         let abortable = task_manager
@@ -291,6 +292,7 @@ impl Downstream {
             upstream_difficulty_config,
             downstreams,
             stats_sender,
+            tx_new_extended_channel,
         )
         .await
         {

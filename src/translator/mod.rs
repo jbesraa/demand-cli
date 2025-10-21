@@ -105,7 +105,7 @@ pub async fn start(
     )
     .await?;
 
-    let upstream_abortable =
+    let (upstream_abortable, tx_new_extended_channel) =
         upstream::Upstream::start(upstream, recv_from_up, rx_sv2_submit_shares_ext).await?;
     TaskManager::add_upstream(task_manager.clone(), upstream_abortable)
         .await
@@ -176,6 +176,7 @@ pub async fn start(
                 diff_config,
                 downstreams,
                 stats_sender,
+                tx_new_extended_channel,
             )
             .await
             {
