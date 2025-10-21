@@ -9,6 +9,7 @@ mod notify;
 mod receive_from_downstream;
 mod send_to_downstream;
 mod task_manager;
+mod intermediate_downstream;
 
 /// This constant is used as a check to ensure clients
 /// do not send a mining.subscribe and never a mining.authorize
