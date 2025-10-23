@@ -40,7 +40,7 @@ fn shares_server_endpoint() -> String {
 fn worker_activity_server_endpoint() -> String {
     // Determine the monitoring server URL based on the environment
     match Configuration::environment().as_str() {
-        "staging" => format!("{}/api/worker/activity", LOCAL_URL),
+        "staging" => format!("{}/api/worker/activity", STAGING_URL),
         "testnet3" => format!("{}/api/worker/activity", TESTNET3_URL),
         "local" => format!("{}/api/worker/activity", LOCAL_URL),
         "production" => format!("{}/api/worker/activity", PRODUCTION_URL),
