@@ -32,6 +32,8 @@ impl ParseServerJobDeclarationMessages for JobDeclarator {
         &mut self,
         _message: DeclareMiningJobError,
     ) -> Result<SendTo, Error> {
+        // TODO consider using declarative names instead of setting states
+        super::super::IS_CUSTOM_JOB_SET.store(true, std::sync::atomic::Ordering::Release);
         Ok(SendTo::None(None))
     }
 

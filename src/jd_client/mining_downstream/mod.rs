@@ -256,34 +256,45 @@ impl DownstreamMiningNode {
                 UpstreamMiningNode::send(&upstream_mutex, incoming).await?;
             }
             Ok(SendTo::RelayNewMessage(Mining::SubmitSharesExtended(mut share))) => {
-                // If we have a realy new message it means that we are in a pooled mining mods.
-                let upstream_mutex = self_mutex
-                    .safe_lock(|s| s.status.get_upstream())
-                    .map_err(|_| JdClientError::JdClientDownstreamMutexCorrupted)?
-                    .ok_or_else(|| {
+                tokio::task::spawn(async move {
+                    // If we have a realy new message it means that we are in a pooled mining mods.
+                    if let Some(upstream_mutex) = self_mutex
+                        .safe_lock(|s| s.status.get_upstream())
+                        .map_err(|_| JdClientError::JdClientDownstreamMutexCorrupted)
+                        .unwrap()
+                    {
+                        // When re receive SetupConnectionSuccess we link the last_template_id with the
+                        // pool's job_id. The below return as soon as we have a pairable job id for the
+                        // template_id associated with this share.
+                        let last_template_id = self_mutex
+                            .safe_lock(|s| s.last_template_id)
+                            .map_err(|_| JdClientError::JdClientDownstreamMutexCorrupted)
+                            .unwrap();
+                        let job_id_future =
+                            UpstreamMiningNode::get_job_id(&upstream_mutex, last_template_id);
+                        //?check
+                        if let Ok(Ok(job_id)) =
+                            timeout(Duration::from_secs(20), job_id_future).await
+                        {
+                            share.job_id = job_id;
+                            debug!(
+                                "Sending valid block solution upstream, with job_id {}",
+                                job_id
+                            );
+                            let message = Mining::SubmitSharesExtended(share);
+                            UpstreamMiningNode::send(&upstream_mutex, message)
+                                .await
+                                .unwrap();
+                        } else {
+                            error!("Timeout getting job_id for last_template_id: {last_template_id}, discard share");
+                        }
+                    } else {
                         error!("Upstream is None Here");
-                        JdClientError::Unrecoverable
-                    })?;
-                // When re receive SetupConnectionSuccess we link the last_template_id with the
-                // pool's job_id. The below return as soon as we have a pairable job id for the
-                // template_id associated with this share.
-                let last_template_id = self_mutex
-                    .safe_lock(|s| s.last_template_id)
-                    .map_err(|_| JdClientError::JdClientDownstreamMutexCorrupted)?;
-                let job_id_future =
-                    UpstreamMiningNode::get_job_id(&upstream_mutex, last_template_id);
-                //?check
-                if let Ok(Ok(job_id)) = timeout(Duration::from_secs(20), job_id_future).await {
-                    share.job_id = job_id;
-                    debug!(
-                        "Sending valid block solution upstream, with job_id {}",
-                        job_id
-                    );
-                    let message = Mining::SubmitSharesExtended(share);
-                    UpstreamMiningNode::send(&upstream_mutex, message).await?;
-                } else {
-                    error!("Timeout getting job_id for last_template_id: {last_template_id}, discard share");
-                }
+                        ProxyState::update_downstream_state(
+                            DownstreamType::JdClientMiningDownstream,
+                        );
+                    }
+                });
             }
             Ok(SendTo::RelayNewMessage(message)) => {
                 let upstream_mutex = self_mutex
@@ -337,6 +348,8 @@ impl DownstreamMiningNode {
         mut new_template: NewTemplate<'static>,
         pool_output: &[u8],
     ) -> Result<(), JdClientError> {
+        // Make sure to set the template handled to true since we do not have a channel opened yet
+        // and template can not be handled without it we will lock template handling forever.
         if !self_mutex
             .safe_lock(|s| s.status.have_channel())
             .map_err(|e| Error::PoisonLock(e.to_string()))?
@@ -651,9 +664,7 @@ impl
                     Share::Standard(_) => unreachable!(),
                 }
             }
-            // When we have a ShareMeetBitcoinTarget it means that the proxy know the bitcoin
-            // target that means that the proxy must have JD capabilities that means that the
-            // second tuple elements can not be None but must be Some(template_id)
+            // ShareMeetBitcoinTarget without template id is impossibvle
             OnNewShare::ShareMeetBitcoinTarget(_) => unreachable!(),
             OnNewShare::SendSubmitShareUpstream(_) => unreachable!(),
             OnNewShare::ShareMeetDownstreamTarget => Ok(SendTo::None(None)),
