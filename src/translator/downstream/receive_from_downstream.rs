@@ -7,20 +7,19 @@ use crate::{
 use roles_logic_sv2::utils::Mutex;
 use std::sync::Arc;
 use sv1_api::{client_to_server::Submit, json_rpc};
-use tokio::sync::mpsc;
 use tokio::task;
 use tracing::{error, warn};
 
 pub async fn start_receive_downstream(
     task_manager: Arc<Mutex<TaskManager>>,
     downstream: Arc<Mutex<Downstream>>,
-    mut recv_from_down: mpsc::Receiver<String>,
+    mut recv_from_down: tokio::sync::broadcast::Receiver<String>,
     connection_id: u32,
 ) -> Result<(), Error<'static>> {
     let handle = {
         let task_manager = task_manager.clone();
         task::spawn(async move {
-            while let Some(incoming) = recv_from_down.recv().await {
+            while let Ok(incoming) = recv_from_down.recv().await {
                 let incoming: Result<json_rpc::Message, _> = serde_json::from_str(&incoming);
                 if let Ok(incoming) = incoming {
                     // if message is Submit Shares update difficulty management

@@ -1,7 +1,10 @@
+#![allow(dead_code)]
+#![allow(unused)]
 use crate::{
     proxy_state::{DownstreamType, ProxyState},
     translator::{
-        error::Error, proxy::Bridge, upstream::diff_management::UpstreamDifficultyConfig,
+        downstream::intermediate_downstream::IntermediateDownstream_, error::Error, proxy::Bridge,
+        upstream::diff_management::UpstreamDifficultyConfig,
     },
 };
 
@@ -22,10 +25,13 @@ pub async fn start_accept_connection(
     tx_mining_notify: broadcast::Sender<server_to_client::Notify<'static>>,
     bridge: Arc<Mutex<super::super::proxy::Bridge>>,
     upstream_difficulty_config: Arc<Mutex<UpstreamDifficultyConfig>>,
-    mut downstreams: Receiver<(Sender<String>, Receiver<String>, IpAddr)>,
+    mut downstreams: Receiver<(
+        tokio::sync::broadcast::Sender<String>,
+        tokio::sync::broadcast::Receiver<String>,
+        IpAddr,
+    )>,
     stats_sender: crate::api::stats::StatsSender,
     tx_new_extended_channel: tokio::sync::mpsc::UnboundedSender<String>,
-
 ) -> Result<(), Error<'static>> {
     let handle = {
         let task_manager = task_manager.clone();
@@ -33,6 +39,7 @@ pub async fn start_accept_connection(
             // This is needed. When bridge want to send a notification if no downstream is
             // available at least one receiver must be around.
             let _s = tx_mining_notify.subscribe();
+            info!("Waiting for connections....");
             while let Some((send, recv, addr)) = downstreams.recv().await {
                 info!("Translator opening connection for ip {}", addr);
                 // The initial difficulty is derived from the formula: difficulty = hash_rate / (shares_per_second * 2^32)
@@ -62,54 +69,56 @@ pub async fn start_accept_connection(
                     "Translator expected hash rate for ip {} is {} H/s",
                     addr, expected_hash_rate
                 );
+                // let new_receiver = recv.resubscribe();
+                // match Bridge::ready(&bridge).await {
+                //     Ok(_) => {
+                //         debug!("Bridge is ready, proceeding with connection");
+                //     }
+                //     Err(_) => {
+                //         error!("Bridge not ready");
+                //         break;
+                //     }
+                // };
+                IntermediateDownstream_::new(send.clone(), recv, tx_sv1_submit.clone()).await;
 
-                match Bridge::ready(&bridge).await {
-                    Ok(_) => {
-                        debug!("Bridge is ready, proceeding with connection");
-                    }
-                    Err(_) => {
-                        error!("Bridge not ready");
-                        break;
-                    }
-                };
-                let open_sv1_downstream =
-                    match bridge.safe_lock(|s| s.on_new_sv1_connection(expected_hash_rate)) {
-                        Ok(sv1_downstream) => sv1_downstream,
-                        Err(e) => {
-                            error!("{e}");
-                            break;
-                        }
-                    };
+                // let open_sv1_downstream =
+                //     match bridge.safe_lock(|s| s.on_new_sv1_connection(expected_hash_rate)) {
+                //         Ok(sv1_downstream) => sv1_downstream,
+                //         Err(e) => {
+                //             error!("{e}");
+                //             break;
+                //         }
+                //     };
 
-                match open_sv1_downstream {
-                    Ok(opened) => {
-                        info!(
-                            "Translator opening connection for ip {} with id {}",
-                            addr, opened.channel_id
-                        );
-                        Downstream::new_downstream(
-                            opened.channel_id,
-                            tx_sv1_submit.clone(),
-                            tx_mining_notify.subscribe(),
-                            opened.extranonce,
-                            opened.last_notify,
-                            opened.extranonce2_len as usize,
-                            addr.to_string(),
-                            upstream_difficulty_config.clone(),
-                            send,
-                            recv,
-                            task_manager.clone(),
-                            initial_difficulty,
-                            stats_sender.clone(),
-                        )
-                        .await
-                    }
-                    Err(e) => {
-                        error!("{e:?}");
-                        ProxyState::update_downstream_state(DownstreamType::TranslatorDownstream);
-                        break;
-                    }
-                }
+                // match open_sv1_downstream {
+                //     Ok(opened) => {
+                //         info!(
+                //             "Translator opening connection for ip {} with id {}",
+                //             addr, opened.channel_id
+                //         );
+                //         Downstream::new_downstream(
+                //             opened.channel_id,
+                //             tx_sv1_submit.clone(),
+                //             tx_mining_notify.subscribe(),
+                //             opened.extranonce,
+                //             opened.last_notify,
+                //             opened.extranonce2_len as usize,
+                //             addr.to_string(),
+                //             upstream_difficulty_config.clone(),
+                //             send,
+                //             recv,
+                //             task_manager.clone(),
+                //             initial_difficulty,
+                //             stats_sender.clone(),
+                //         )
+                //         .await
+                //     }
+                //     Err(e) => {
+                //         error!("{e:?}");
+                //         ProxyState::update_downstream_state(DownstreamType::TranslatorDownstream);
+                //         break;
+                //     }
+                // }
             }
         })
     };

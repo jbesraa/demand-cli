@@ -155,6 +155,7 @@ async fn initialize_proxy(
         let sv1_ingress_abortable = ingress::sv1_ingress::start_listen_for_downstream(downs_sv1_tx);
 
         let (translator_up_tx, mut translator_up_rx) = channel(10);
+        info!("before translator start");
         let translator_abortable =
             match translator::start(downs_sv1_rx, translator_up_tx, stats_sender.clone()).await {
                 Ok(abortable) => abortable,
@@ -166,6 +167,7 @@ async fn initialize_proxy(
                     return;
                 }
             };
+        info!("after translator start");
 
         let (from_jdc_to_share_accounter_send, from_jdc_to_share_accounter_recv) = channel(10);
         let (from_share_accounter_to_jdc_send, from_share_accounter_to_jdc_recv) = channel(10);

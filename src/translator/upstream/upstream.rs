@@ -114,11 +114,9 @@ impl Upstream {
         target: Arc<Mutex<Vec<u8>>>,
         difficulty_config: Arc<Mutex<UpstreamDifficultyConfig>>,
         sender: TSender<Mining<'static>>,
+        tx_new_extended_channel: tokio::sync::mpsc::UnboundedSender<String>,
+        rx_new_extended_channel: tokio::sync::mpsc::UnboundedReceiver<String>,
     ) -> ProxyResult<'static, Arc<Mutex<Self>>> {
-        // Channel for downstream to communicate with upstream when it needs to open a new extended
-        // channel
-        let (tx_new_extended_channel, rx_new_extended_channel) =
-            tokio::sync::mpsc::unbounded_channel::<String>();
         Ok(Arc::new(Mutex::new(Self {
             extranonce_prefix: None,
             tx_sv2_set_new_prev_hash,
@@ -252,8 +250,8 @@ impl Upstream {
             let self_ = self_.clone();
             task::spawn(async move {
                 // No need to start diff management immediatly
-                tokio::time::sleep(Duration::from_secs(5)).await;
                 loop {
+                    tokio::time::sleep(Duration::from_secs(5)).await;
                     if let Err(e) = Self::try_update_hashrate(self_.clone()).await {
                         error!("Failed to update hashrate: {e:?}");
                         return;

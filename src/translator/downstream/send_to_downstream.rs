@@ -10,7 +10,7 @@ use tracing::{error, warn};
 pub async fn start_send_to_downstream(
     task_manager: Arc<Mutex<TaskManager>>,
     mut receiver_outgoing: mpsc::Receiver<json_rpc::Message>,
-    send_to_down: mpsc::Sender<String>,
+    send_to_down: tokio::sync::broadcast::Sender<String>,
     connection_id: u32,
     host: String,
 ) -> Result<(), Error<'static>> {
@@ -23,7 +23,7 @@ pub async fn start_send_to_downstream(
                     break;
                 }
             };
-            if send_to_down.send(to_send).await.is_err() {
+            if send_to_down.send(to_send).is_err() {
                 warn!("Downstream {} dropped", host);
                 break;
             }

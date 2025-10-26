@@ -135,8 +135,8 @@ impl Downstream {
         extranonce2_len: usize,
         host: String,
         upstream_difficulty_config: Arc<Mutex<UpstreamDifficultyConfig>>,
-        send_to_down: Sender<String>,
-        recv_from_down: Receiver<String>,
+        send_to_down: tokio::sync::broadcast::Sender<String>,
+        recv_from_down: tokio::sync::broadcast::Receiver<String>,
         task_manager: Arc<Mutex<TaskManager>>,
         initial_difficulty: f32,
         stats_sender: StatsSender,
@@ -275,10 +275,15 @@ impl Downstream {
         tx_mining_notify: broadcast::Sender<server_to_client::Notify<'static>>,
         bridge: Arc<Mutex<super::super::proxy::Bridge>>,
         upstream_difficulty_config: Arc<Mutex<UpstreamDifficultyConfig>>,
-        downstreams: Receiver<(Sender<String>, Receiver<String>, IpAddr)>,
+        downstreams: Receiver<(
+            tokio::sync::broadcast::Sender<String>,
+            tokio::sync::broadcast::Receiver<String>,
+            IpAddr,
+        )>,
         stats_sender: StatsSender,
         tx_new_extended_channel: tokio::sync::mpsc::UnboundedSender<String>,
     ) -> Result<AbortOnDrop, Error<'static>> {
+        info!("translator downstream accept connections");
         let task_manager = TaskManager::initialize();
         let abortable = task_manager
             .safe_lock(|t| t.get_aborter())

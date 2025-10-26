@@ -9,7 +9,7 @@ use bitcoin::Address;
 use error::Error;
 
 use roles_logic_sv2::{parsers::Mining, utils::Mutex};
-use tracing::error;
+use tracing::{error, info};
 
 use std::{net::IpAddr, sync::Arc};
 use tokio::sync::mpsc::channel;
@@ -28,7 +28,11 @@ mod task_manager;
 use task_manager::TaskManager;
 
 pub async fn start(
-    downstreams: TReceiver<(TSender<String>, TReceiver<String>, IpAddr)>,
+    downstreams: TReceiver<(
+        tokio::sync::broadcast::Sender<String>,
+        tokio::sync::broadcast::Receiver<String>,
+        IpAddr,
+    )>,
     pool_connection: TSender<(
         TSender<Mining<'static>>,
         TReceiver<Mining<'static>>,
@@ -94,6 +98,10 @@ pub async fn start(
     let diff_config = Arc::new(Mutex::new(upstream_diff));
 
     // Instantiate a new `Upstream` (SV2 Pool)
+    // Channel for downstream to communicate with upstream when it needs to open a new extended
+    // channel
+    let (tx_new_extended_channel, rx_new_extended_channel) =
+        tokio::sync::mpsc::unbounded_channel::<String>();
     let upstream = upstream::Upstream::new(
         tx_sv2_set_new_prev_hash,
         tx_sv2_new_ext_mining_job,
@@ -102,11 +110,16 @@ pub async fn start(
         target.clone(),
         diff_config.clone(),
         send_to_up,
+        tx_new_extended_channel,
+        rx_new_extended_channel,
     )
     .await?;
 
     let (upstream_abortable, tx_new_extended_channel) =
         upstream::Upstream::start(upstream, recv_from_up, rx_sv2_submit_shares_ext).await?;
+    if let Err(e) = tx_new_extended_channel.send("ProxyFirstChannel".to_string()) {
+        error!("Failed to open first channel with upstream {}", e);
+    }
     TaskManager::add_upstream(task_manager.clone(), upstream_abortable)
         .await
         .map_err(|_| Error::TranslatorTaskManagerFailed)?;
@@ -115,6 +128,7 @@ pub async fn start(
         let target = target.clone();
         let task_manager = task_manager.clone();
         tokio::task::spawn(async move {
+            info!("heeeeerrreee");
             let (extended_extranonce, up_id) = match rx_sv2_extranonce.recv().await {
                 Some((extended_extranonce, up_id)) => (extended_extranonce, up_id),
                 None => {
@@ -123,6 +137,7 @@ pub async fn start(
                     return;
                 }
             };
+            info!("heeeeerrreee111111111111");
 
             loop {
                 let target: [u8; 32] =  match target.safe_lock(|t| t.clone()) {
@@ -169,6 +184,7 @@ pub async fn start(
                 }
             };
 
+            info!("started bridge");
             let downstream_aborter = match downstream::Downstream::accept_connections(
                 tx_sv1_bridge,
                 tx_sv1_notify,
@@ -186,6 +202,7 @@ pub async fn start(
                     return;
                 }
             };
+            info!("accepting from downstream");
 
             if TaskManager::add_bridge(task_manager.clone(), bridge_aborter)
                 .await

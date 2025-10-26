@@ -14,13 +14,17 @@ use futures::{
 use roles_logic_sv2::utils::Mutex;
 use tokio::{
     net::{TcpListener, TcpStream},
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::mpsc::Sender,
 };
 use tokio_util::codec::{Framed, LinesCodec};
 use tracing::{error, info, warn};
 
 pub fn start_listen_for_downstream(
-    downstreams: Sender<(Sender<String>, Receiver<String>, IpAddr)>,
+    downstreams: Sender<(
+        tokio::sync::broadcast::Sender<String>,
+        tokio::sync::broadcast::Receiver<String>,
+        IpAddr,
+    )>,
 ) -> AbortOnDrop {
     tokio::task::spawn(async move {
         let down_addr: String = crate::SV1_DOWN_LISTEN_ADDR.to_string();
@@ -55,25 +59,34 @@ impl Downstream {
         stream: TcpStream,
         max_len_for_downstream_messages: u32,
         address: IpAddr,
-        downstreams: Sender<(Sender<String>, Receiver<String>, IpAddr)>,
+        downstreams: Sender<(
+            tokio::sync::broadcast::Sender<String>,
+            tokio::sync::broadcast::Receiver<String>,
+            IpAddr,
+        )>,
     ) {
         tokio::spawn(async move {
             info!("spawning downstream");
-            let (send_to_upstream, recv) = channel(10);
-            let (send, recv_from_upstream) = channel(10);
+            let (send_to_upstream, recv) = tokio::sync::broadcast::channel(10);
+            info!("spawning downstream1");
+            let (send, recv_from_upstream) = tokio::sync::broadcast::channel(10);
+            info!("spawning downstream2");
             downstreams
                 .send((send, recv, address))
                 .await
                 .expect("Translator busy");
+            info!("spawning downstream3");
             let codec = LinesCodec::new_with_max_length(max_len_for_downstream_messages as usize);
+            info!("spawning downstream4");
             let framed = Framed::new(stream, codec);
+            info!("spawning downstream5");
             Self::start(framed, recv_from_upstream, send_to_upstream).await
         });
     }
     async fn start(
         framed: Framed<TcpStream, LinesCodec>,
-        receiver: Receiver<String>,
-        sender: Sender<String>,
+        receiver: tokio::sync::broadcast::Receiver<String>,
+        sender: tokio::sync::broadcast::Sender<String>,
     ) {
         let (writer, reader) = framed.split();
         let firmware = Arc::new(Mutex::new(Firmware::Uninitialized));
@@ -90,7 +103,7 @@ impl Downstream {
     }
     async fn receive_from_downstream_and_relay_up(
         mut recv: SplitStream<Framed<TcpStream, LinesCodec>>,
-        send: Sender<String>,
+        send: tokio::sync::broadcast::Sender<String>,
         firmware: Arc<Mutex<Firmware>>,
     ) -> Sv1IngressError {
         let mut is_subscribed = false;
@@ -107,7 +120,7 @@ impl Downstream {
                         firmware.safe_lock(|f| *f = Firmware::Other).unwrap();
                     }
                 }
-                if send.send(message).await.is_err() {
+                if send.send(message).is_err() {
                     error!("Upstream dropped trying to send");
                     return Sv1IngressError::TranslatorDropped;
                 }
@@ -123,12 +136,12 @@ impl Downstream {
     }
     async fn receive_from_upstream_and_relay_down(
         mut send: SplitSink<Framed<TcpStream, LinesCodec>, String>,
-        mut recv: Receiver<String>,
+        mut recv: tokio::sync::broadcast::Receiver<String>,
         firmware_: Arc<Mutex<Firmware>>,
     ) -> Sv1IngressError {
         let mut firmware = Firmware::Uninitialized;
         let task = tokio::spawn(async move {
-            while let Some(message) = recv.recv().await {
+            while let Ok(message) = recv.recv().await {
                 let mut message = message.replace(['\n', '\r'], "");
                 if !firmware.is_initialized() {
                     firmware = firmware_.safe_lock(|f| *f).unwrap();
