@@ -86,6 +86,7 @@ pub struct Upstream {
     // than the configured percentage
     pub(super) difficulty_config: Arc<Mutex<UpstreamDifficultyConfig>>,
     pub sender: TSender<Mining<'static>>,
+    signature: String,
 }
 
 impl PartialEq for Upstream {
@@ -109,6 +110,7 @@ impl Upstream {
         target: Arc<Mutex<Vec<u8>>>,
         difficulty_config: Arc<Mutex<UpstreamDifficultyConfig>>,
         sender: TSender<Mining<'static>>,
+        signature: String,
     ) -> ProxyResult<'static, Arc<Mutex<Self>>> {
         Ok(Arc::new(Mutex::new(Self {
             extranonce_prefix: None,
@@ -123,6 +125,7 @@ impl Upstream {
             target,
             difficulty_config,
             sender,
+            signature,
         })))
     }
 
@@ -383,8 +386,18 @@ impl Upstream {
                             return;
                         }
                     };
+                    let signature = match self_.safe_lock(|s| s.signature.clone()) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            error!("Translator upstream mutex corrupted: {e}");
+                            return;
+                        }
+                    };
 
                     sv2_submit.channel_id = channel_id;
+                    let mut extranonce = signature.as_bytes().to_vec();
+                    extranonce.extend_from_slice(&sv2_submit.extranonce.to_vec());
+                    sv2_submit.extranonce = extranonce.try_into().unwrap();
 
                     let message =
                         roles_logic_sv2::parsers::Mining::SubmitSharesExtended(sv2_submit);
@@ -506,12 +519,16 @@ impl ParseUpstreamMiningMessages<Downstream, NullDownstreamMiningSelector, NoRou
     /// role in a SV1 `mining.subscribe` message response.
     fn handle_open_extended_mining_channel_success(
         &mut self,
-        m: roles_logic_sv2::mining_sv2::OpenExtendedMiningChannelSuccess,
+        mut m: roles_logic_sv2::mining_sv2::OpenExtendedMiningChannelSuccess,
     ) -> Result<SendTo<Downstream>, RolesLogicError> {
         info!(
             "Handling OpenExtendedMiningChannelSuccess message from Pool for Channel Id: {}",
             m.channel_id
         );
+        let mut prefix = m.extranonce_prefix.to_vec();
+        prefix.extend_from_slice(self.signature.as_bytes());
+        m.extranonce_prefix = prefix.try_into().unwrap();
+        m.extranonce_size -= self.signature.len() as u16;
         let tproxy_e1_len =
             proxy_extranonce1_len(m.extranonce_size as usize, self.min_extranonce_size.into())
                 as u16;
