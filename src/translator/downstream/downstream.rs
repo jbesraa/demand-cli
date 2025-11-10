@@ -167,7 +167,7 @@ impl Downstream {
         // The positive D gain (0.05) dampens rapid changes, e.g., if share rate jumps from 8 to 12, D might
         // add a small positive adjustment to prevent overshooting.
 
-        let mut pid: Pid<f32> = Pid::new(crate::SHARE_PER_MIN, initial_difficulty * 10.0);
+        let mut pid: Pid<f32> = Pid::new(*crate::SHARE_PER_MIN, initial_difficulty * 10.0);
         let pk = -initial_difficulty * 0.01;
         //let pi = initial_difficulty * 0.1;
         //let pd = initial_difficulty * 0.01;

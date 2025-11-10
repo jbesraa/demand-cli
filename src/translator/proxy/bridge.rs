@@ -99,7 +99,7 @@ impl Bridge {
                 ids,
                 extranonces,
                 None,
-                crate::SHARE_PER_MIN,
+                *crate::SHARE_PER_MIN,
                 ExtendedChannelKind::Proxy { upstream_target },
                 None,
                 channel_id,
