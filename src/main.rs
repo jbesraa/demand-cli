@@ -33,7 +33,6 @@ const MIN_EXTRANONCE_SIZE: u16 = 6;
 const MIN_EXTRANONCE2_SIZE: u16 = 5;
 const UPSTREAM_EXTRANONCE1_SIZE: usize = 20;
 const DEFAULT_SV1_HASHPOWER: f32 = 100_000_000_000_000.0;
-const SHARE_PER_MIN: f32 = 10.0;
 const CHANNEL_DIFF_UPDTATE_INTERVAL: u32 = 10;
 const MAX_LEN_DOWN_MSG: u32 = 10000;
 const MAIN_AUTH_PUB_KEY: &str = "9c44K6QVizyPWb9xfeqhckFRosxWwB3EfytGa4CfTdD526qb2QV";
@@ -67,6 +66,12 @@ lazy_static! {
     } else {
         MAIN_AUTH_PUB_KEY
     };
+}
+lazy_static! {
+    static ref SHARE_PER_MIN: f32 = std::env::var("SHARE_PER_MIN")
+        .unwrap_or("6.0".to_string())
+        .parse::<f32>()
+        .expect("SHARE_PER_MIN is not a valid number");
 }
 
 #[tokio::main]

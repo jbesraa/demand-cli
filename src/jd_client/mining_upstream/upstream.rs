@@ -411,7 +411,7 @@ impl ParseUpstreamMiningMessages<Downstream, NullDownstreamMiningSelector, NoRou
             ids,
             extranonces,
             creator,
-            crate::SHARE_PER_MIN,
+            *crate::SHARE_PER_MIN,
             channel_kind,
             vec![],
             vec![],

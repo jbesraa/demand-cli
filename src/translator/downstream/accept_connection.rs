@@ -39,7 +39,7 @@ pub async fn start_accept_connection(
                     "Translator initial hash rate for ip {} is {} H/s",
                     addr, initial_hash_rate
                 );
-                let share_per_second = crate::SHARE_PER_MIN / 60.0;
+                let share_per_second = *crate::SHARE_PER_MIN / 60.0;
                 info!(
                     "Translator share per second for ip {} is {} shares/s",
                     addr, share_per_second
@@ -55,7 +55,7 @@ pub async fn start_accept_connection(
                 );
                 // Formula: expected_hash_rate = (shares_per_second) * initial_difficulty * 2^32, where shares_per_second = SHARE_PER_MIN / 60
                 let expected_hash_rate =
-                    (crate::SHARE_PER_MIN / 60.0) * initial_difficulty * 2f32.powf(32.0);
+                    (*crate::SHARE_PER_MIN / 60.0) * initial_difficulty * 2f32.powf(32.0);
                 info!(
                     "Translator expected hash rate for ip {} is {} H/s",
                     addr, expected_hash_rate

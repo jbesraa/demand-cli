@@ -220,7 +220,7 @@ impl Downstream {
         let new_difficulty = (latest_difficulty + pid_output).max(initial_difficulty * 0.1);
         let nearest = nearest_power_of_10(new_difficulty);
         if nearest != initial_difficulty {
-            let mut pid: Pid<f32> = Pid::new(crate::SHARE_PER_MIN, nearest * 10.0);
+            let mut pid: Pid<f32> = Pid::new(*crate::SHARE_PER_MIN, nearest * 10.0);
             let pk = -nearest * 0.01;
             //let pi = initial_difficulty * 0.1;
             //let pd = initial_difficulty * 0.01;
@@ -231,7 +231,7 @@ impl Downstream {
             })?;
 
             let new_estimation =
-                Self::estimate_hash_rate_from_difficulty(nearest, crate::SHARE_PER_MIN);
+                Self::estimate_hash_rate_from_difficulty(nearest, *crate::SHARE_PER_MIN);
             Self::update_self_with_new_hash_rate(self_, new_estimation, nearest)?;
             Ok(Some(nearest))
         } else {
@@ -240,7 +240,7 @@ impl Downstream {
             let change = (new_difficulty - latest_difficulty).abs() / latest_difficulty;
             if change > threshold {
                 let new_estimation =
-                    Self::estimate_hash_rate_from_difficulty(new_difficulty, crate::SHARE_PER_MIN);
+                    Self::estimate_hash_rate_from_difficulty(new_difficulty, *crate::SHARE_PER_MIN);
                 Self::update_self_with_new_hash_rate(self_, new_estimation, new_difficulty)?;
                 Ok(Some(new_difficulty))
             } else {
@@ -412,7 +412,7 @@ mod test {
     }
 
     fn get_diff(hashrate: f32) -> f32 {
-        let share_per_second = crate::SHARE_PER_MIN / 60.0;
+        let share_per_second = *crate::SHARE_PER_MIN / 60.0;
         let initial_difficulty = hashrate / (share_per_second * 2f32.powf(32.0));
         crate::translator::downstream::diff_management::nearest_power_of_10(initial_difficulty)
     }
