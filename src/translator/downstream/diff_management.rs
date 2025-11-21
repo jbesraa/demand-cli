@@ -143,7 +143,7 @@ impl Downstream {
     /// The target T is calculated as T = pdiff / D, where pdiff is the maximum target
     pub fn difficulty_to_target(difficulty: f32) -> [u8; 32] {
         // Clamp difficulty to avoid division by zero or overflow
-        let difficulty = f32::max(difficulty, f32::MIN);
+        let difficulty = f32::max(difficulty, 0.001);
 
         let pdiff: [u8; 32] = [
             0, 0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
