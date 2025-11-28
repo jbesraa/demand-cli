@@ -145,7 +145,7 @@ impl JobDeclarator {
         self_mutex
             .safe_lock(|s| {
                 //check hashmap size in order to not let it grow indefinetely
-                if s.last_declare_mining_jobs_sent.len() < 10 {
+                if s.last_declare_mining_jobs_sent.len() < 1000 {
                     s.last_declare_mining_jobs_sent.insert(request_id, Some(j));
                 } else if let Some(min_key) = s.last_declare_mining_jobs_sent.keys().min().cloned()
                 {
@@ -226,7 +226,7 @@ impl JobDeclarator {
     ) -> Result<(), Error> {
         let now = std::time::Instant::now();
         while !super::IS_CUSTOM_JOB_SET.load(std::sync::atomic::Ordering::Acquire) {
-            if now.elapsed().as_secs() > 30 {
+            if now.elapsed().as_secs() > 120 {
                 error!("Failed to set custom job");
                 ProxyState::update_jd_state(JdState::Down);
                 return Err(Error::Unrecoverable);
@@ -234,6 +234,7 @@ impl JobDeclarator {
             tokio::task::yield_now().await;
         }
         super::IS_CUSTOM_JOB_SET.store(false, std::sync::atomic::Ordering::Release);
+        // now as u64 unix time
         let (id, _, sender) = self_mutex
             .safe_lock(|s| (s.req_ids.next(), s.min_extranonce_size, s.sender.clone()))
             .map_err(|_| Error::JobDeclaratorMutexCorrupted)?;

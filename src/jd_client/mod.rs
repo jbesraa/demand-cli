@@ -39,6 +39,7 @@ use tracing::{error, info};
 pub static IS_NEW_TEMPLATE_HANDLED: AtomicBool = AtomicBool::new(true);
 
 pub static IS_CUSTOM_JOB_SET: AtomicBool = AtomicBool::new(true);
+pub static IS_NEW_PHASH_ARRIVED: AtomicBool = AtomicBool::new(false);
 
 use crate::proxy_state::{DownstreamType, ProxyState, TpState};
 use roles_logic_sv2::{parsers::Mining, utils::Mutex};
@@ -59,6 +60,7 @@ pub async fn start(
     // This will not work when we implement support for multiple upstream
     IS_CUSTOM_JOB_SET.store(true, std::sync::atomic::Ordering::Release);
     IS_NEW_TEMPLATE_HANDLED.store(true, std::sync::atomic::Ordering::Release);
+    IS_NEW_PHASH_ARRIVED.store(false, std::sync::atomic::Ordering::Release);
     initialize_jd(receiver, sender, up_receiver, up_sender).await
 }
 

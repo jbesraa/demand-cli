@@ -57,7 +57,7 @@ impl CircularBuffer {
 
 impl std::default::Default for CircularBuffer {
     fn default() -> Self {
-        Self::new(10)
+        Self::new(1000)
     }
 }
 
@@ -561,75 +561,42 @@ impl ParseUpstreamMiningMessages<Downstream, NullDownstreamMiningSelector, NoRou
     /// role.
     fn handle_set_new_prev_hash(
         &mut self,
-        m: roles_logic_sv2::mining_sv2::SetNewPrevHash,
+        _m: roles_logic_sv2::mining_sv2::SetNewPrevHash,
     ) -> Result<roles_logic_sv2::handlers::mining::SendTo<Downstream>, RolesLogicError> {
-        if let Some(downstream) = &self.downstream {
-            if let Ok(Some(jd)) = downstream.safe_lock(|d| d.jd.clone()) {
-                // Compare pool's prev_hash with JD's prev_hash
-                let is_mismatch = jd
-                    .safe_lock(|jd| jd.last_set_new_prev_hash.clone())
-                    .map(|tp| match tp {
-                        Some(tp) => tp.prev_hash != m.prev_hash,
-                        None => true, // Treat as mismatch if jd last_set_new_prev_hash is None
-                    })
-                    .map_err(|_| RolesLogicError::PoisonLock("JD mutex corrupt".to_string()))?;
-
-                if is_mismatch {
-                    info!("Pool's SetNewPrevHash differs from TP or TP SetNewPrevHash not received; starting 10s timer");
-                    let jd_clone = jd.clone();
-                    let pool_prev_hash = m.prev_hash.clone().into_static();
-                    tokio::task::spawn(async move {
-                        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-                        // After 10 seconds, check if Jd's prev_hash matches the pool's
-                        let current_jd_prev_hash = jd_clone
-                            .safe_lock(|j| j.last_set_new_prev_hash.clone())
-                            .map_err(|_| error!("Job declaration Mutex corrupt"))
-                            .unwrap_or(None);
-
-                        let still_mismatch = current_jd_prev_hash
-                            .map(|tp| tp.prev_hash != pool_prev_hash)
-                            .unwrap_or(true); // Mismatch if current_jd_prev_hash is still None
-
-                        if still_mismatch {
-                            error!("Stopping job declaration due to persistent prev_hash mismatch");
-                            // Set TP_ADDRESS to None and restart proxy to switch to non-jd mode
-                            if crate::TP_ADDRESS.safe_lock(|tp| *tp = None).is_err() {
-                                error!("TP_ADDRESS mutex corrupt");
-                            };
-                            ProxyState::update_inconsistency(Some(1));
-                        }
-                    });
-                }
-            }
-        }
         warn!("SNPH received from upstream, proxy ignores it, and uses the one declared by JOB DECLARATOR");
         Ok(SendTo::None(None))
     }
 
-    /// Handles the SV2 `SetCustomMiningJobSuccess` message (TODO).
+    /// Handles the SV2 `SetCustomMiningJobSuccess` message.
     fn handle_set_custom_mining_job_success(
         &mut self,
         m: roles_logic_sv2::mining_sv2::SetCustomMiningJobSuccess,
     ) -> Result<roles_logic_sv2::handlers::mining::SendTo<Downstream>, RolesLogicError> {
-        // TODO
-        info!("Set custom mining job success {}", m.job_id);
         if let Some(template_id) = self.template_to_job_id.take_template_id(m.request_id) {
             self.template_to_job_id
                 .register_job_id(template_id, m.job_id);
+            info!(
+                "Set custom mining job success {}, for template {}",
+                m.job_id, template_id
+            );
             IS_CUSTOM_JOB_SET.store(true, std::sync::atomic::Ordering::Release);
             Ok(SendTo::None(None))
         } else {
-            error!("Attention received a SetupConnectionSuccess with unknown request_id");
+            error!(
+                "Attention received a SetupConnectionSuccess with unknown request_id: {}",
+                m.request_id
+            );
             Ok(SendTo::None(None))
         }
     }
 
-    /// Handles the SV2 `SetCustomMiningJobError` message (TODO).
+    /// Handles the SV2 `SetCustomMiningJobError` message.
     fn handle_set_custom_mining_job_error(
         &mut self,
         _m: roles_logic_sv2::mining_sv2::SetCustomMiningJobError,
     ) -> Result<roles_logic_sv2::handlers::mining::SendTo<Downstream>, RolesLogicError> {
-        todo!()
+        IS_CUSTOM_JOB_SET.store(true, std::sync::atomic::Ordering::Release);
+        Ok(SendTo::None(None))
     }
 
     /// Handles the SV2 `SetTarget` message which updates the Downstream role(s) target
