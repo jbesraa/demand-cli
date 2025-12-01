@@ -227,7 +227,10 @@ impl JobDeclarator {
         let now = std::time::Instant::now();
         while !super::IS_CUSTOM_JOB_SET.load(std::sync::atomic::Ordering::Acquire) {
             if now.elapsed().as_secs() > 120 {
-                error!("Failed to set custom job");
+                error!(
+                    "Failed to set custom job after 2 minutes for new template with id {}",
+                    template.template_id
+                );
                 ProxyState::update_jd_state(JdState::Down);
                 return Err(Error::Unrecoverable);
             }
