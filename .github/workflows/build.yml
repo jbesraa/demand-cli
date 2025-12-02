@@ -1,4 +1,4 @@
-name: Build demand-cli binaries for Linux and macOS 
+name: Build dmnd-client binaries for Linux and macOS 
 
 on:
   push:
@@ -24,13 +24,13 @@ jobs:
         run: cargo build --release
 
       - name: Rename Linux Binary
-        run: mv target/release/demand-cli demand-cli-linux
+        run: mv target/release/dmnd-client dmnd-client-linux
 
       - name: Upload Linux Artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-artifact
-          path: demand-cli-linux
+          path: dmnd-client-linux
 
   build-macos:
     name: Build macOS Binary
@@ -46,13 +46,13 @@ jobs:
         run: cargo build --release
 
       - name: Rename macOS Binary
-        run: mv target/release/demand-cli demand-cli-macos
+        run: mv target/release/dmnd-client dmnd-client-macos
 
       - name: Upload macOS Artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-artifact
-          path: demand-cli-macos
+          path: dmnd-client-macos
 
   build-windows:
     name: Build Windows Binary
@@ -68,13 +68,13 @@ jobs:
         run: cargo build --release
 
       - name: Rename Windows Binary
-        run: move target\release\demand-cli.exe demand-cli-windows.exe
+        run: move target\release\dmnd-client.exe dmnd-client-windows.exe
 
       - name: Upload Windows Artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-artifact
-          path: demand-cli-windows.exe
+          path: dmnd-client-windows.exe
 
   create-release:
     name: Create GitHub Release and Upload Binaries
@@ -139,8 +139,8 @@ jobs:
         with:
           tag_name: ${{ env.TAG_NAME }}
           files: |
-            demand-cli-linux
-            demand-cli-macos
-            demand-cli-windows.exe
+            dmnd-client-linux
+            dmnd-client-macos
+            dmnd-client-windows.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
