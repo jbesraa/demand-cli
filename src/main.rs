@@ -12,11 +12,12 @@ use key_utils::Secp256k1PublicKey;
 use lazy_static::lazy_static;
 use proxy_state::{PoolState, ProxyState, TpState, TranslatorState};
 use self_update::{backends, cargo_crate_version, update::UpdateStatus, TempDir};
+use std::sync::OnceLock;
 use std::{net::SocketAddr, time::Duration};
 use tokio::sync::mpsc::channel;
 use tracing::{debug, error, info, warn};
-mod api;
 
+mod api;
 mod config;
 mod ingress;
 pub mod jd_client;
@@ -74,6 +75,8 @@ lazy_static! {
         .expect("SHARE_PER_MIN is not a valid number");
 }
 
+static LOG_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
+
 #[tokio::main]
 async fn main() {
     let log_level = Configuration::loglevel();
@@ -97,7 +100,8 @@ async fn main() {
 
     if enable_file_logging {
         let file_appender = tracing_appender::rolling::daily("logs", "dmnd-client.log");
-        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+        LOG_GUARD.set(guard).unwrap_or(());
         let file_layer = tracing_subscriber::fmt::layer()
             .with_writer(non_blocking)
             .with_ansi(false) // file logs should not contain color codes
