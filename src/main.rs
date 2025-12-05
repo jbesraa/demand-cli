@@ -6,7 +6,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
-use crate::{monitor::logs::SendLogLayer, shared::utils::AbortOnDrop};
+use crate::shared::utils::AbortOnDrop;
 use config::Configuration;
 use key_utils::Secp256k1PublicKey;
 use lazy_static::lazy_static;
@@ -79,18 +79,21 @@ async fn main() {
     let log_level = Configuration::loglevel();
     let noise_connection_log_level = Configuration::nc_loglevel();
 
-    let remote_layer = SendLogLayer::new();
+    // let remote_layer = SendLogLayer::new();
     let console_layer =
         tracing_subscriber::fmt::layer().with_filter(tracing_subscriber::EnvFilter::new(format!(
             "{},demand_sv2_connection::noise_connection_tokio={}",
             log_level, noise_connection_log_level
         )));
+
     //Disable noise_connection error (for now) because:
     // 1. It produce logs that are not very user friendly and also bloat the logs
-    // 2. The errors resulting from noise_connection are handled. E.g if unrecoverable error from noise connection occurs during Pool connection: We either retry connecting immediatley or we update Proxy state to Pool Down
+    // 2. The errors resulting from noise_connection are handled. E.g if unrecoverable error from
+    //    noise connection occurs during Pool connection: We either retry connecting immediatley or
+    //    we update Proxy state to Pool Down
     tracing_subscriber::registry()
         .with(console_layer)
-        .with(remote_layer)
+        // .with(remote_layer)
         .init();
 
     Configuration::token().expect("TOKEN is not set");
